@@ -64,6 +64,7 @@ def test_scheduler_snapshot_exposes_capacity_controls():
             "aging_seconds": 5,
             "resource_limits": {},
             "resources_in_use": {},
+            "leased_execution": False,
         }
     finally:
         gate.set()
