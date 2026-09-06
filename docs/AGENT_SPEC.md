@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the deterministic runtime behavior around model calls, planning, tools, verification, and recovery.
+Define the deterministic runtime behavior around model calls, planning, tools, verification, recovery, and resumable execution.
 
 ## State Machine
 
@@ -14,6 +14,9 @@ QUEUED → PLANNING → EXECUTING → VERIFYING → SUCCEEDED
              │       REPLANNING
              ↓
       AWAITING_APPROVAL
+             │
+             ↓
+           PAUSED ─────────→ EXECUTING
 
 Any active state → CANCELLED
 Recoverable failure → REPLANNING or retry
@@ -33,6 +36,9 @@ Policy violation → BLOCKED
 8. Retries are bounded and respect idempotency.
 9. Cancellation prevents new side effects after the cancellation boundary.
 10. Secrets never enter model context unless explicitly approved by the security layer.
+11. A pause request is a cooperative control boundary: the runtime stops before starting the next plan decision, persists state, and emits a pause event.
+12. Resume clears the pause control, restores the latest durable plan/observations/approvals/recovery history, and continues from the last verified checkpoint.
+13. In-flight work is never reported as successfully paused until the runtime reaches a checkpoint boundary.
 
 ## Planning
 
@@ -44,6 +50,11 @@ The planner may replan when observations contradict assumptions, a tool fails, o
 
 ```text
 while task is active:
+    check cooperative pause control
+    if pause requested:
+        checkpoint plan + observations + approvals + recovery history
+        transition to PAUSED
+        return
     observe current state
     select next plan step
     validate tool/model request
@@ -52,8 +63,25 @@ while task is active:
     execute within limits
     record observation
     verify result
+    checkpoint
     continue, retry, replan, ask, block, or finish
 ```
+
+## Durable State
+
+A resumable checkpoint contains:
+
+- task ID
+- current plan and revision
+- completed steps
+- observations
+- approvals
+- recovery history
+- last verified step
+- lifecycle/checkpoint status
+- update timestamp
+
+The checkpoint is execution state, not user memory. It is restored only for the same authorized task/owner scope.
 
 ## Recovery
 
@@ -69,6 +97,14 @@ The runtime asks the user when a decision is ambiguous, required information is 
 
 Cancellation is first-class. A task may be cancelled by the user or system policy. Running tools should receive cancellation where supported. The runtime must record whether cancellation occurred before or after an external side effect.
 
+## Pause and Resume
+
+`POST /v1/tasks/{task_id}/pause` requests a cooperative pause. The request is persisted separately from the checkpoint so a process restart cannot silently lose it. The runtime honors it at the next safe checkpoint boundary and persists status `PAUSED`.
+
+`POST /v1/tasks/{task_id}/resume` is valid only for a paused task with persisted agent state. It clears the pause control, reconstructs the plan, restores observations and recovery history, and resumes execution. Terminal tasks cannot be resumed.
+
+The current AETHON-0 HTTP execution path is synchronous; therefore pause is cooperative rather than a forced thread/process interrupt. Distributed workers and queue-backed execution can later use the same durable control contract.
+
 ## Runtime Invariants
 
 - No unauthorized side effect.
@@ -76,3 +112,5 @@ Cancellation is first-class. A task may be cancelled by the user or system polic
 - No silent state transition.
 - No successful status without verification criteria being satisfied.
 - No cross-project memory access without authorization.
+- No resume without an authorized persisted checkpoint.
+- No forced interruption in the middle of an unsafe/non-cancellable side effect.
