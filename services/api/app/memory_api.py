@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 from pydantic import BaseModel, Field
 
-from aethon.memory_engine import MemorySecurityError, default_memory_engine
+from aethon.memory_engine import MemorySecurityError
+from aethon.memory_repository import MemoryRepository
 
 
 class MemoryWriteRequest(BaseModel):
@@ -12,7 +13,7 @@ class MemoryWriteRequest(BaseModel):
     project_id: str | None = Field(default=None, max_length=200)
     namespace: str = Field(default="default", max_length=128)
     memory_type: str = Field(default="semantic", max_length=64)
-    source: str = Field(default="agent", max_length=128)
+    source: str = Field(default="user", max_length=128)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     expires_at: str | None = None
 
@@ -26,27 +27,26 @@ class MemorySearchRequest(BaseModel):
 
 class MemoryDeleteRequest(BaseModel):
     project_id: str | None = None
-    namespace: str = "default"
+    namespace: str = Field(default="default", max_length=128)
 
 
-memory_engine = default_memory_engine
+memory_repository = MemoryRepository()
 
 
-def write_memory(request: MemoryWriteRequest) -> dict[str, Any]:
-    return memory_engine.put(
-        request.memory_id, request.content, project_id=request.project_id,
-        namespace=request.namespace, memory_type=request.memory_type,
-        source=request.source, confidence=request.confidence,
-        expires_at=request.expires_at,
+def write_memory(request: MemoryWriteRequest, *, owner_id: str) -> dict[str, Any]:
+    return memory_repository.put(
+        request.memory_id, request.content, owner_id=owner_id, project_id=request.project_id,
+        namespace=request.namespace, memory_type=request.memory_type, source=request.source,
+        confidence=request.confidence, expires_at=request.expires_at,
     ).__dict__
 
 
-def search_memory(request: MemorySearchRequest) -> list[dict[str, Any]]:
-    return [r.__dict__ for r in memory_engine.search(
-        request.query, project_id=request.project_id,
+def search_memory(request: MemorySearchRequest, *, owner_id: str) -> list[dict[str, Any]]:
+    return [r.__dict__ for r in memory_repository.search(
+        request.query, owner_id=owner_id, project_id=request.project_id,
         namespace=request.namespace, limit=request.limit,
     )]
 
 
-def delete_memory(memory_id: str, request: MemoryDeleteRequest) -> bool:
-    return memory_engine.delete(memory_id, project_id=request.project_id, namespace=request.namespace)
+def delete_memory(memory_id: str, request: MemoryDeleteRequest, *, owner_id: str) -> bool:
+    return memory_repository.delete(memory_id, owner_id=owner_id, project_id=request.project_id, namespace=request.namespace)
