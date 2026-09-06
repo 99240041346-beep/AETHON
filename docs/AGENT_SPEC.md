@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the deterministic runtime behavior around model calls, planning, tools, verification, recovery, and resumable execution.
+Define deterministic runtime behavior around model calls, planning, tools, verification, recovery, resumability, and concurrent scheduling.
 
 ## State Machine
 
@@ -36,9 +36,31 @@ Policy violation → BLOCKED
 8. Retries are bounded and respect idempotency.
 9. Cancellation prevents new side effects after the cancellation boundary.
 10. Secrets never enter model context unless explicitly approved by the security layer.
-11. A pause request is a cooperative control boundary: the runtime stops before starting the next plan decision, persists state, and emits a pause event.
-12. Resume clears the pause control, restores the latest durable plan/observations/approvals/recovery history, and continues from the last verified checkpoint.
-13. In-flight work is never reported as successfully paused until the runtime reaches a checkpoint boundary.
+11. Scheduler concurrency is bounded by an explicit worker limit.
+12. Task priority affects scheduling order only and cannot bypass security policy.
+13. Pausing occurs at a safe checkpoint; in-flight non-cancellable work reaches its boundary first.
+14. Resume restores the persisted plan, observations, approvals, last verified step, and recovery history.
+
+## Scheduler
+
+AETHON uses a bounded priority scheduler for concurrent agent tasks:
+
+```text
+Task request
+    ↓
+Priority queue
+    ↓
+Bounded worker pool
+ ┌──────┬──────┬──────┐
+Agent  Agent  Agent  ...
+ └──────┴──────┴──────┘
+    ↓
+Durable checkpoints
+```
+
+Lower numeric priority values execute first. Equal priorities retain FIFO ordering. The worker limit is configured with `AETHON_MAX_CONCURRENT_TASKS` and defaults to four.
+
+The scheduler is an execution mechanism, not an authorization mechanism. Every worker still runs through the normal Safety Kernel, verification, audit, and recovery controls.
 
 ## Planning
 
@@ -112,5 +134,6 @@ The current AETHON-0 HTTP execution path is synchronous; therefore pause is coop
 - No silent state transition.
 - No successful status without verification criteria being satisfied.
 - No cross-project memory access without authorization.
+- No concurrency setting may override policy or resource limits.
 - No resume without an authorized persisted checkpoint.
 - No forced interruption in the middle of an unsafe/non-cancellable side effect.
