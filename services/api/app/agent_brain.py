@@ -104,8 +104,11 @@ class AgentBrain:
         try:
             step = self._find(plan, step_id)
         except KeyError:
-            step = PlanStep(step_id, "Verify the recovered candidate", StepKind.VERIFY, depends_on=list(plan.completed_steps[-1:]))
-            plan.steps.append(step)
+            # If a recovery caller names a not-yet-materialized step, reopen the
+            # latest existing candidate rather than inventing an unconnected step.
+            if not plan.steps:
+                raise
+            step = plan.steps[-1]
 
         failure = self.classify_failure(reason)
         tools = available_tools or set()
