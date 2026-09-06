@@ -1,4 +1,4 @@
-from aethon.memory_engine import MemorySecurityError, PersistentMemoryEngine
+from aethon.memory_engine import MemorySecurityError, PersistentMemoryEngine, detect_memory_conflicts
 
 
 def test_memory_is_project_and_namespace_isolated():
@@ -35,3 +35,30 @@ def test_delete_requires_matching_scope():
     memory.put("x", "data", project_id="p", namespace="project")
     assert memory.delete("x", project_id="other", namespace="project") is False
     assert memory.delete("x", project_id="p", namespace="project") is True
+
+
+def test_memory_owner_isolation():
+    memory = PersistentMemoryEngine()
+    memory.put("x", "private architecture", owner_id="alice", project_id="p", namespace="project")
+    memory.put("y", "private architecture", owner_id="bob", project_id="p", namespace="project")
+    assert [r.memory_id for r in memory.search("architecture", owner_id="alice", project_id="p", namespace="project")] == ["x"]
+
+
+def test_conflict_analysis_requires_explicit_key():
+    memory = PersistentMemoryEngine()
+    a = memory.put("a", "database: postgres", project_id="p", namespace="project")
+    b = memory.put("b", "database: sqlite", project_id="p", namespace="project")
+    conflicts = detect_memory_conflicts([a, b])
+    assert len(conflicts) == 1
+    assert conflicts[0].key == "database"
+    assert set(conflicts[0].memory_ids) == {"a", "b"}
+
+
+def test_consolidation_reports_duplicates_without_deleting():
+    memory = PersistentMemoryEngine()
+    memory.put("a", "preferred framework: FastAPI", project_id="p", namespace="project")
+    memory.put("b", "preferred framework: FastAPI", project_id="p", namespace="project")
+    report = memory.consolidate_candidates(owner_id="local-dev", project_id="p", namespace="project")
+    assert report["records_considered"] == 2
+    assert ["a", "b"] in report["duplicate_groups"]
+    assert memory.count(project_id="p", namespace="project") == 2
