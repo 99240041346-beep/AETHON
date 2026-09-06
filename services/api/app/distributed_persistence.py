@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
 
 from .postgres import PostgresStore, PostgresStoreUnavailable
@@ -51,7 +51,6 @@ class DistributedTaskPersistence:
         if lease_seconds <= 0:
             raise ValueError("lease_seconds must be > 0")
         token = uuid.uuid4().hex
-        task = str(task_id)
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -66,7 +65,7 @@ class DistributedTaskPersistence:
                            expires_at = EXCLUDED.expires_at
                        WHERE worker_leases.expires_at <= NOW()
                        RETURNING lease_token""",
-                    (task, worker_id, token, lease_seconds),
+                    (str(task_id), worker_id, token, lease_seconds),
                 )
                 row = cur.fetchone()
                 return row[0] if row else None
@@ -91,7 +90,7 @@ class DistributedTaskPersistence:
         return bool(rows)
 
     def claim_expired(self, worker_id: str, lease_seconds: float = 30.0) -> list[RecoveryCandidate]:
-        """Claim expired active leases for this worker without a delete-before-claim race."""
+        """Claim expired leases atomically; racing workers can only have one winner."""
         if not worker_id:
             raise ValueError("worker_id is required")
         if lease_seconds <= 0:
@@ -110,10 +109,11 @@ class DistributedTaskPersistence:
         return claimed
 
     def recoverable_tasks(self) -> list[UUID]:
+        """Return abandoned executable tasks; approval-paused work is excluded."""
         rows = self.store.execute(
             """SELECT t.task_id FROM tasks t
                LEFT JOIN worker_leases l ON l.task_id = t.task_id
-               WHERE t.status IN ('QUEUED','EXECUTING','REPLANNING','VERIFYING','AWAITING_APPROVAL')
+               WHERE t.status IN ('QUEUED','EXECUTING','REPLANNING','VERIFYING')
                  AND (l.task_id IS NULL OR l.expires_at <= NOW())
                ORDER BY t.priority ASC, t.created_at ASC"""
         )
