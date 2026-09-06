@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sqlite3
 import threading
 from concurrent.futures import Future
@@ -13,10 +14,12 @@ from aethon.agent import AgentRuntime
 from aethon.agent_state import AgentStateStore
 from aethon.scheduler import TaskScheduler
 from aethon.schemas import Event, Task, TaskCreate, TaskStatus
+from aethon.worker_lease import WorkerLeaseStore
+from aethon.worker_pool import LeasedWorkerPool
 
 
 class TaskStore:
-    """Durable task/event store with bounded concurrent agent scheduling."""
+    """Durable task/event store with bounded, lease-protected agent scheduling."""
 
     def __init__(self, database_path: str | None = None):
         path = database_path or os.getenv("AETHON_SQLITE_PATH", ".aethon/aethon.db")
@@ -24,11 +27,21 @@ class TaskStore:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.state_store = AgentStateStore(str(self.database_path.with_name(self.database_path.stem + "_agent_state.db")))
         self.runtime = AgentRuntime(state_store=self.state_store)
-        self.scheduler = TaskScheduler(self.runtime.run)
+        self.worker_id = os.getenv("AETHON_WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}"
+        lease_path = os.getenv("AETHON_LEASE_PATH", str(self.database_path.with_name(self.database_path.stem + "_worker_leases.db")))
+        self.lease_store = WorkerLeaseStore(lease_path)
+        self.worker_pool = LeasedWorkerPool(
+            self.runtime.run,
+            self.lease_store,
+            self.worker_id,
+            lease_seconds=float(os.getenv("AETHON_WORKER_LEASE_SECONDS", "30")),
+            heartbeat_seconds=float(os.getenv("AETHON_WORKER_HEARTBEAT_SECONDS", "5")),
+        )
+        self.scheduler = TaskScheduler(self.runtime.run, worker_pool=self.worker_pool, lease_key=lambda task: str(task.task_id))
         self._futures: dict[UUID, Future] = {}
         self._future_lock = threading.Lock()
         self._init_db()
-        self._recover_queued_tasks()
+        self._recover_tasks()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.database_path)
@@ -94,21 +107,44 @@ class TaskStore:
         with self._future_lock:
             self._futures.pop(task_id, None)
 
-    def _recover_queued_tasks(self) -> None:
-        """Re-admit durable QUEUED tasks after an API-process restart."""
+    def _recover_tasks(self) -> None:
+        """Recover queued work and abandoned active work after restart.
+
+        PAUSED and AWAITING_APPROVAL require explicit user action and are not
+        automatically resumed.
+        """
+        recoverable = {
+            TaskStatus.QUEUED.value,
+            TaskStatus.PLANNING.value,
+            TaskStatus.EXECUTING.value,
+            TaskStatus.REPLANNING.value,
+            TaskStatus.VERIFYING.value,
+        }
+        placeholders = ",".join("?" for _ in recoverable)
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT task_id, goal, project_id, priority, owner_id FROM tasks WHERE status=? ORDER BY created_at",
-                (TaskStatus.QUEUED.value,),
+                f"SELECT task_id, goal, project_id, priority, owner_id, status FROM tasks WHERE status IN ({placeholders}) ORDER BY priority ASC, created_at ASC",
+                tuple(recoverable),
             ).fetchall()
         for row in rows:
-            task = Task(task_id=UUID(row["task_id"]), goal=row["goal"], project_id=row["project_id"],
+            task_id = UUID(row["task_id"])
+            state = self.state_store.load(task_id)
+            if row["status"] != TaskStatus.QUEUED.value and state is None:
+                continue
+            task = Task(task_id=task_id, goal=row["goal"], project_id=row["project_id"],
                         priority=row["priority"], owner_id=row["owner_id"], status=TaskStatus.QUEUED)
+            self._persist_task(task)
             try:
                 future = self._submit(task)
             except RuntimeError:
                 break
-            self.runtime._event(task, "task.recovered", {"scheduler": "bounded-thread-pool", "priority": task.priority})
+            self.runtime._event(task, "task.recovered", {
+                "scheduler": "bounded-thread-pool",
+                "worker_id": self.worker_id,
+                "resume_from_checkpoint": state is not None,
+                "previous_status": row["status"],
+                "priority": task.priority,
+            })
             self._persist_events(task.task_id)
             future.add_done_callback(lambda completed, task_id=task.task_id: self._persist_recovered_result(task_id, completed))
 
@@ -130,7 +166,7 @@ class TaskStore:
     def create(self, request: TaskCreate) -> Task:
         task = Task(goal=request.goal, project_id=request.project_id, priority=request.priority, owner_id=request.owner_id)
         self._persist_task(task)
-        self.runtime._event(task, "task.queued", {"priority": task.priority, "scheduler": "bounded-thread-pool"})
+        self.runtime._event(task, "task.queued", {"priority": task.priority, "scheduler": "bounded-thread-pool", "worker_id": self.worker_id})
         self._persist_events(task.task_id)
         future = self._submit(task)
         try:
@@ -142,7 +178,9 @@ class TaskStore:
         return result
 
     def scheduler_status(self) -> dict[str, object]:
-        return self.scheduler.snapshot()
+        snapshot = self.scheduler.snapshot()
+        snapshot["worker_id"] = self.worker_id
+        return snapshot
 
     def get(self, task_id: UUID) -> Task | None:
         with self._connect() as conn:
