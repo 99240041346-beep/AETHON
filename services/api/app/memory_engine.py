@@ -23,6 +23,7 @@ class MemoryRecord:
     created_at: str
     updated_at: str
     expires_at: str | None = None
+    owner_id: str = "local-dev"
 
 
 class MemorySecurityError(ValueError):
@@ -44,57 +45,37 @@ def validate_namespace(namespace: str) -> str:
 
 
 class PersistentMemoryEngine:
-    """Thread-safe memory runtime with project/namespace isolation."""
+    """Thread-safe development memory with owner/project/namespace isolation."""
 
     def __init__(self):
         self._records: dict[str, MemoryRecord] = {}
         self._lock = RLock()
 
-    def put(
-        self,
-        memory_id: str,
-        content: str,
-        *,
-        project_id: str | None = None,
-        namespace: str = "default",
-        memory_type: str = "semantic",
-        source: str = "agent",
-        confidence: float = 1.0,
-        expires_at: str | None = None,
-    ) -> MemoryRecord:
+    def put(self, memory_id: str, content: str, *, owner_id: str = "local-dev", project_id: str | None = None,
+            namespace: str = "default", memory_type: str = "semantic", source: str = "agent",
+            confidence: float = 1.0, expires_at: str | None = None) -> MemoryRecord:
         namespace = validate_namespace(namespace)
-        if not memory_id.strip() or not content.strip():
-            raise MemorySecurityError("memory id and content are required")
+        if not owner_id.strip() or not memory_id.strip() or not content.strip():
+            raise MemorySecurityError("owner_id, memory id and content are required")
         if not 0.0 <= confidence <= 1.0:
             raise MemorySecurityError("confidence must be between 0 and 1")
         safe_content = redact_secrets(content.strip())
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             old = self._records.get(memory_id)
-            record = MemoryRecord(
-                memory_id=memory_id,
-                content=safe_content,
-                namespace=namespace,
-                project_id=project_id,
-                memory_type=memory_type,
-                source=source,
-                confidence=confidence,
-                created_at=old.created_at if old else now,
-                updated_at=now,
-                expires_at=expires_at,
-            )
+            if old and (old.owner_id != owner_id or old.project_id != project_id or old.namespace != namespace):
+                raise MemorySecurityError("memory id belongs to another authorized scope")
+            record = MemoryRecord(memory_id=memory_id, content=safe_content, namespace=namespace,
+                project_id=project_id, memory_type=memory_type, source=source, confidence=confidence,
+                created_at=old.created_at if old else now, updated_at=now, expires_at=expires_at, owner_id=owner_id)
             self._records[memory_id] = record
             return record
 
-    def search(
-        self,
-        query: str,
-        *,
-        project_id: str | None = None,
-        namespace: str = "default",
-        limit: int = 10,
-    ) -> list[MemoryRecord]:
+    def search(self, query: str, *, owner_id: str = "local-dev", project_id: str | None = None,
+               namespace: str = "default", limit: int = 10) -> list[MemoryRecord]:
         namespace = validate_namespace(namespace)
+        if not owner_id.strip():
+            raise MemorySecurityError("owner_id is required")
         limit = max(1, min(limit, 100))
         terms = [t for t in re.findall(r"[\w-]+", query.lower()) if t]
         now = datetime.now(timezone.utc)
@@ -102,7 +83,7 @@ class PersistentMemoryEngine:
         with self._lock:
             records = list(self._records.values())
         for record in records:
-            if record.namespace != namespace or record.project_id != project_id:
+            if record.owner_id != owner_id or record.namespace != namespace or record.project_id != project_id:
                 continue
             if record.expires_at:
                 try:
@@ -119,21 +100,21 @@ class PersistentMemoryEngine:
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [record for _, record in scored[:limit]]
 
-    def delete(self, memory_id: str, *, project_id: str | None = None, namespace: str = "default") -> bool:
+    def delete(self, memory_id: str, *, owner_id: str = "local-dev", project_id: str | None = None,
+               namespace: str = "default") -> bool:
         namespace = validate_namespace(namespace)
         with self._lock:
             record = self._records.get(memory_id)
-            if not record or record.project_id != project_id or record.namespace != namespace:
+            if not record or record.owner_id != owner_id or record.project_id != project_id or record.namespace != namespace:
                 return False
             del self._records[memory_id]
             return True
 
-    def count(self, *, project_id: str | None = None, namespace: str = "default") -> int:
+    def count(self, *, owner_id: str = "local-dev", project_id: str | None = None, namespace: str = "default") -> int:
         namespace = validate_namespace(namespace)
         with self._lock:
-            return sum(1 for r in self._records.values() if r.project_id == project_id and r.namespace == namespace)
+            return sum(1 for r in self._records.values()
+                       if r.owner_id == owner_id and r.project_id == project_id and r.namespace == namespace)
 
 
-# API and task execution share this runtime boundary. Callers/tests can still
-# inject an isolated PersistentMemoryEngine into AgentRuntime when needed.
 default_memory_engine = PersistentMemoryEngine()
