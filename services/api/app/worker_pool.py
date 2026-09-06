@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import threading
-import time
 from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Callable, Generic, TypeVar
 
-from .worker_lease import WorkerLeaseManager
+from .worker_lease import WorkerLeaseStore
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -22,7 +21,7 @@ class WorkerExecution(Generic[T, R]):
 class LeasedWorkerPool(Generic[T, R]):
     """Executes scheduler work only while holding a renewable worker lease."""
 
-    def __init__(self, worker: Callable[[T], R], leases: WorkerLeaseManager, worker_id: str, lease_seconds: float = 30.0, heartbeat_seconds: float = 5.0):
+    def __init__(self, worker: Callable[[T], R], leases: WorkerLeaseStore, worker_id: str, lease_seconds: float = 30.0, heartbeat_seconds: float = 5.0):
         if lease_seconds <= 0 or heartbeat_seconds <= 0 or heartbeat_seconds >= lease_seconds:
             raise ValueError("heartbeat_seconds must be positive and less than lease_seconds")
         self._worker = worker
@@ -37,9 +36,7 @@ class LeasedWorkerPool(Generic[T, R]):
 
         def heartbeat() -> None:
             while not stop.wait(self.heartbeat_seconds):
-                try:
-                    self._leases.heartbeat(task_id, self.worker_id, token, self.lease_seconds)
-                except Exception:
+                if not self._leases.heartbeat(task_id, self.worker_id, token, self.lease_seconds):
                     stop.set()
                     return
 
@@ -53,4 +50,5 @@ class LeasedWorkerPool(Generic[T, R]):
             self._leases.release(task_id, self.worker_id, token)
 
     def lease_is_current(self, task_id: str, token: str) -> bool:
-        return self._leases.is_current(task_id, self.worker_id, token)
+        lease = self._leases.get(task_id)
+        return bool(lease and lease["worker_id"] == self.worker_id and lease["lease_token"] == token and not lease["expired"])
