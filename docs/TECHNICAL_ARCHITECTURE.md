@@ -68,7 +68,7 @@ receive(task)
   → execute_step()
   → observe()
   → verify()
-  → continue | replan | ask | pause | block | finish
+  → continue | replan | ask | pause | cancel | block | finish
 ```
 
 The runtime must support cancellation, timeouts, bounded retries, and recovery from tool failures.
@@ -269,7 +269,7 @@ Resource quotas
     ↓
 N bounded workers
  ┌──────┬──────┬──────┐
-Agent  Agent  Agent  ...
+ Agent  Agent  Agent  ...
  └──────┴──────┴──────┘
     ↓
 Durable task/agent checkpoints
@@ -279,13 +279,18 @@ Rules:
 
 - lower numeric priority executes first
 - equal priority is FIFO among eligible tasks
+- aging prevents a continuously busy high-priority queue from starving older lower-priority work
 - tasks may depend on previously submitted scheduler futures
 - a dependent task cannot start until all dependencies succeed
 - independent ready work can bypass a blocked dependency
 - resource requests are admitted only when the configured quota is available
 - a request exceeding a declared quota is rejected at admission
 - `AETHON_MAX_CONCURRENT_TASKS` caps active workers
+- `AETHON_MAX_QUEUED_TASKS` bounds admission backlog
 - scheduler admission never bypasses Safety Kernel authorization
+- queued futures can be cancelled before worker admission
+- running cancellation is cooperative: the durable control is observed at the next runtime checkpoint
+- durable `QUEUED` tasks are re-admitted when the API process restarts
 - worker failures propagate to the task's normal recovery path
 
 The current implementation intentionally uses a bounded thread pool rather than introducing Redis/Kubernetes before the workload requires distributed coordination. The dependency and resource interfaces are designed to survive a later move to a durable distributed queue.
@@ -319,9 +324,12 @@ Important runtime events include:
 ```text
 task.created
 task.queued
+task.recovered
 task.state_changed
 task.paused
 task.pause_requested
+task.cancel_requested
+task.cancelled
 plan.created
 plan.replaced
 plan.replanned
