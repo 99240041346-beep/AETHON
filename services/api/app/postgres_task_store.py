@@ -39,25 +39,46 @@ class PostgreSQLTaskStore:
         self._future_lock = threading.Lock()
 
     def _init_db(self) -> None:
-        self.postgres.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            task_id UUID PRIMARY KEY, goal TEXT NOT NULL, project_id TEXT,
-            owner_id TEXT NOT NULL DEFAULT 'local-dev', priority INTEGER NOT NULL DEFAULT 5,
-            status TEXT NOT NULL, result_json JSONB, error TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS events (
-            event_id UUID PRIMARY KEY, task_id UUID NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
-            type TEXT NOT NULL, data_json JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS audit_log (
-            audit_id UUID PRIMARY KEY, task_id UUID REFERENCES tasks(task_id) ON DELETE CASCADE,
-            action TEXT NOT NULL, data_json JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_audit_task ON audit_log(task_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_tasks_recovery ON tasks(status, priority, created_at);
-        """)
+        # Keep runtime bootstrap aligned with the canonical PostgreSQL schema. The
+        # API can therefore start against an empty database in CI or a new service.
+        statements = [
+            """CREATE TABLE IF NOT EXISTS tasks (
+                task_id UUID PRIMARY KEY, goal TEXT NOT NULL, project_id TEXT,
+                owner_id TEXT NOT NULL DEFAULT 'local-dev', priority INTEGER NOT NULL DEFAULT 5,
+                status TEXT NOT NULL, result_json JSONB, error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""",
+            """CREATE TABLE IF NOT EXISTS events (
+                event_id UUID PRIMARY KEY, task_id UUID NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+                type TEXT NOT NULL, data_json JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""",
+            """CREATE TABLE IF NOT EXISTS audit_log (
+                audit_id UUID PRIMARY KEY, task_id UUID REFERENCES tasks(task_id) ON DELETE CASCADE,
+                action TEXT NOT NULL, data_json JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""",
+            """CREATE TABLE IF NOT EXISTS memories (
+                memory_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL DEFAULT 'local-dev',
+                project_id TEXT,
+                namespace TEXT NOT NULL,
+                content TEXT NOT NULL,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                confidence DOUBLE PRECISION NOT NULL DEFAULT 1.0 CHECK (confidence BETWEEN 0 AND 1),
+                source TEXT NOT NULL DEFAULT 'agent',
+                memory_type TEXT NOT NULL DEFAULT 'semantic',
+                expires_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_audit_task ON audit_log(task_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_tasks_recovery ON tasks(status, priority, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_memories_owner_project_namespace ON memories(owner_id, project_id, namespace)",
+            "CREATE INDEX IF NOT EXISTS idx_memories_namespace_type ON memories(namespace, memory_type)",
+            "CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at)",
+        ]
+        for statement in statements:
+            self.postgres.execute(statement)
 
     def _persist_task(self, task: Task) -> None:
         self.postgres.execute("""INSERT INTO tasks(task_id,goal,project_id,owner_id,priority,status,result_json,error,created_at,updated_at)
