@@ -5,6 +5,8 @@ from aethon.store import TaskStore
 from aethon.tools import ToolRegistry
 from aethon.security import SafetyKernel
 from aethon.model_router import ModelRouter
+from aethon.memory_api import MemoryWriteRequest, MemorySearchRequest, MemoryDeleteRequest, write_memory, search_memory, delete_memory
+from aethon.memory_engine import MemorySecurityError
 
 app = FastAPI(title='AETHON API', version='0.1.0')
 store = TaskStore()
@@ -37,6 +39,30 @@ def execute_tool(request: ToolRequest):
     if decision != 'ALLOW':
         raise HTTPException(403, f'action {decision.lower()}')
     return tools.execute(request)
+
+@app.post('/v1/memory')
+def create_memory(request: MemoryWriteRequest):
+    try:
+        return write_memory(request)
+    except MemorySecurityError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@app.post('/v1/memory/search')
+def search_memories(request: MemorySearchRequest):
+    try:
+        return search_memory(request)
+    except MemorySecurityError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@app.delete('/v1/memory/{memory_id}')
+def remove_memory(memory_id: str, request: MemoryDeleteRequest):
+    try:
+        deleted = delete_memory(memory_id, request)
+        if not deleted:
+            raise HTTPException(404, 'memory not found in authorized scope')
+        return {'ok': True, 'memory_id': memory_id}
+    except MemorySecurityError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 @app.post('/v1/tasks', response_model=Task)
 def create_task(request: TaskCreate):
