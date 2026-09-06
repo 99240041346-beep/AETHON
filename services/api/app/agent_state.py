@@ -19,7 +19,7 @@ class AgentState:
 
 
 class AgentStateStore:
-    """Durable task state store with SQLite persistence and in-memory fallback."""
+    """Durable task state and cooperative execution controls."""
 
     def __init__(self, path: str = ".aethon/agent_state.db"):
         import os
@@ -28,6 +28,7 @@ class AgentStateStore:
         self._sqlite3 = sqlite3
         self.path = path
         self._memory: dict[str, AgentState] = {}
+        self._memory_controls: dict[str, dict[str, bool]] = {}
         try:
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             self._conn = sqlite3.connect(path, check_same_thread=False)
@@ -35,8 +36,11 @@ class AgentStateStore:
                 "CREATE TABLE IF NOT EXISTS agent_state (task_id TEXT PRIMARY KEY, state_json TEXT NOT NULL, updated_at TEXT NOT NULL)"
             )
             self._conn.execute(
-                "CREATE TABLE IF NOT EXISTS agent_controls (task_id TEXT PRIMARY KEY, pause_requested INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)"
+                "CREATE TABLE IF NOT EXISTS agent_controls (task_id TEXT PRIMARY KEY, pause_requested INTEGER NOT NULL DEFAULT 0, cancel_requested INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)"
             )
+            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(agent_controls)").fetchall()}
+            if "cancel_requested" not in columns:
+                self._conn.execute("ALTER TABLE agent_controls ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
             self._conn.commit()
         except Exception:
             self._conn = None
@@ -52,8 +56,7 @@ class AgentStateStore:
         self._memory[state.task_id] = state
         if self._conn is not None:
             self._conn.execute(
-                "INSERT INTO agent_state(task_id,state_json,updated_at) VALUES(?,?,?) "
-                "ON CONFLICT(task_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at",
+                "INSERT INTO agent_state(task_id,state_json,updated_at) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at",
                 (state.task_id, json.dumps(asdict(state)), state.updated_at),
             )
             self._conn.commit()
@@ -72,33 +75,60 @@ class AgentStateStore:
                 return state
         return self._memory.get(key)
 
-    def request_pause(self, task_id: UUID | str) -> None:
+    def _set_control(self, task_id: UUID | str, *, pause: bool | None = None, cancel: bool | None = None) -> None:
         key = str(task_id)
         now = self._now()
         if self._conn is not None:
+            row = self._conn.execute("SELECT pause_requested, cancel_requested FROM agent_controls WHERE task_id=?", (key,)).fetchone()
+            current_pause, current_cancel = (bool(row[0]), bool(row[1])) if row else (False, False)
+            next_pause = current_pause if pause is None else pause
+            next_cancel = current_cancel if cancel is None else cancel
             self._conn.execute(
-                "INSERT INTO agent_controls(task_id,pause_requested,updated_at) VALUES(?,?,?) "
-                "ON CONFLICT(task_id) DO UPDATE SET pause_requested=1, updated_at=excluded.updated_at",
-                (key, 1, now),
+                "INSERT INTO agent_controls(task_id,pause_requested,cancel_requested,updated_at) VALUES(?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET pause_requested=excluded.pause_requested, cancel_requested=excluded.cancel_requested, updated_at=excluded.updated_at",
+                (key, int(next_pause), int(next_cancel), now),
             )
             self._conn.commit()
+        else:
+            current = self._memory_controls.setdefault(key, {"pause": False, "cancel": False})
+            if pause is not None:
+                current["pause"] = pause
+            if cancel is not None:
+                current["cancel"] = cancel
+
+    def request_pause(self, task_id: UUID | str) -> None:
+        self._set_control(task_id, pause=True)
 
     def pause_requested(self, task_id: UUID | str) -> bool:
         key = str(task_id)
         if self._conn is not None:
             row = self._conn.execute("SELECT pause_requested FROM agent_controls WHERE task_id=?", (key,)).fetchone()
             return bool(row and row[0])
-        return False
+        return bool(self._memory_controls.get(key, {}).get("pause"))
 
-    def clear_pause(self, task_id: UUID | str) -> None:
+    def request_cancel(self, task_id: UUID | str) -> None:
+        self._set_control(task_id, cancel=True, pause=False)
+
+    def cancel_requested(self, task_id: UUID | str) -> bool:
+        key = str(task_id)
+        if self._conn is not None:
+            row = self._conn.execute("SELECT cancel_requested FROM agent_controls WHERE task_id=?", (key,)).fetchone()
+            return bool(row and row[0])
+        return bool(self._memory_controls.get(key, {}).get("cancel"))
+
+    def clear_controls(self, task_id: UUID | str) -> None:
         key = str(task_id)
         if self._conn is not None:
             self._conn.execute("DELETE FROM agent_controls WHERE task_id=?", (key,))
             self._conn.commit()
+        self._memory_controls.pop(key, None)
+
+    def clear_pause(self, task_id: UUID | str) -> None:
+        self._set_control(task_id, pause=False)
 
     def delete(self, task_id: UUID | str) -> None:
         key = str(task_id)
         self._memory.pop(key, None)
+        self._memory_controls.pop(key, None)
         if self._conn is not None:
             self._conn.execute("DELETE FROM agent_state WHERE task_id=?", (key,))
             self._conn.execute("DELETE FROM agent_controls WHERE task_id=?", (key,))
