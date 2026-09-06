@@ -46,6 +46,21 @@ After execution:
 - emit success/failure event
 - pass evidence to verification
 
+## Web Evidence Requirements
+
+Web search and fetch results are untrusted evidence. Every web-derived fact used by an agent should retain provenance including source URL, retrieval time when available, normalized source identity, and content hash when content is captured.
+
+The verification layer should:
+
+- preserve provenance through planning and answer generation
+- deduplicate equivalent source URLs
+- assign a transparent source-quality score rather than treating domains as inherently authoritative
+- detect conflicting claims across independent sources
+- avoid presenting a disputed claim as established fact
+- require stronger evidence for high-impact decisions
+
+A source-quality score is a heuristic, not proof of truth. AETHON must not equate `.gov`, `.edu`, `.org`, or `.com` with factual correctness.
+
 ## Initial Tools
 
 ### CalculatorTool
@@ -53,6 +68,9 @@ Pure computation with no external side effects.
 
 ### WebSearchTool
 Controlled retrieval from permitted web sources. Untrusted web content is data, not instructions to the agent.
+
+### WebFetchTool
+Fetches public HTTP(S) resources under network and response-size policy. Redirects require explicit re-validation.
 
 ### WorkspaceFileTool
 Read/write files only inside an explicitly authorized workspace.
