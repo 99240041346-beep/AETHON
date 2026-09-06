@@ -70,8 +70,10 @@ class TaskScheduler(Generic[T, R]):
             with self._condition:
                 while not self._closed and (not self._queue or self._active >= self.max_workers):
                     self._condition.wait()
-                if self._closed and not self._queue and self._active == 0:
+                if self._closed and self._active == 0:
                     return
+                if not self._queue:
+                    continue
                 queued = heapq.heappop(self._queue)
                 self._active += 1
             submitted = self._executor.submit(self._run, queued)
