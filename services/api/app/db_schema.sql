@@ -21,8 +21,7 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_events_task_created
-    ON events(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_task_created ON events(task_id, created_at);
 
 CREATE TABLE IF NOT EXISTS audit_log (
     audit_id UUID PRIMARY KEY,
@@ -33,8 +32,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_task_created
-    ON audit_log(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_task_created ON audit_log(task_id, created_at);
 
 CREATE TABLE IF NOT EXISTS memories (
     memory_id UUID PRIMARY KEY,
@@ -42,8 +40,14 @@ CREATE TABLE IF NOT EXISTS memories (
     namespace TEXT NOT NULL,
     content TEXT NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    confidence DOUBLE PRECISION NOT NULL DEFAULT 1.0 CHECK (confidence BETWEEN 0 AND 1),
+    source TEXT NOT NULL DEFAULT 'agent',
+    memory_type TEXT NOT NULL DEFAULT 'semantic',
+    expires_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_memories_project_namespace
-    ON memories(project_id, namespace);
+CREATE INDEX IF NOT EXISTS idx_memories_project_namespace ON memories(project_id, namespace);
+CREATE INDEX IF NOT EXISTS idx_memories_namespace_type ON memories(namespace, memory_type);
+CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at);
