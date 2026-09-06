@@ -86,7 +86,7 @@ def test_scheduler_skips_blocked_dependency_for_ready_work():
         gate.set()
         assert slow.result(timeout=2) == "slow"
         assert dependent.result(timeout=2) == "dependent"
-        assert started == ["slow", "independent", "dependent"]
+        assert started == ["independent", "slow", "dependent"]
     finally:
         scheduler.shutdown()
 
