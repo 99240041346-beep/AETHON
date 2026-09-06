@@ -4,6 +4,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from aethon.memory_engine import MemorySecurityError
+from aethon.memory_intelligence import compress_context, maintenance_plan
 from aethon.memory_repository import MemoryRepository
 
 
@@ -30,6 +31,14 @@ class MemoryDeleteRequest(BaseModel):
     namespace: str = Field(default="default", max_length=128)
 
 
+class MemoryMaintenanceRequest(BaseModel):
+    project_id: str | None = Field(default=None, max_length=200)
+    namespace: str = Field(default="default", max_length=128)
+    max_records: int = Field(default=500, ge=1, le=1000)
+    max_context_chars: int = Field(default=6000, ge=500, le=50000)
+    forget_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
+
+
 memory_repository = MemoryRepository()
 
 
@@ -50,3 +59,14 @@ def search_memory(request: MemorySearchRequest, *, owner_id: str) -> list[dict[s
 
 def delete_memory(memory_id: str, request: MemoryDeleteRequest, *, owner_id: str) -> bool:
     return memory_repository.delete(memory_id, owner_id=owner_id, project_id=request.project_id, namespace=request.namespace)
+
+
+def plan_memory_maintenance(request: MemoryMaintenanceRequest, *, owner_id: str) -> dict[str, object]:
+    records = memory_repository.list_scope(owner_id=owner_id, project_id=request.project_id,
+                                           namespace=request.namespace, limit=request.max_records)
+    plan = maintenance_plan(records, max_chars=request.max_context_chars,
+                            forget_threshold=request.forget_threshold)
+    plan["scope"] = {"owner_id": owner_id, "project_id": request.project_id, "namespace": request.namespace}
+    plan["records_considered"] = len(records)
+    plan["compressed_context"] = [r.__dict__ for r in compress_context(records, max_chars=request.max_context_chars)]
+    return plan
