@@ -29,7 +29,7 @@ def test_competing_workers_claim_each_task_once():
         pytest.skip("AETHON_DATABASE_URL is not configured")
     persistence = DistributedTaskPersistence(_db_url())
     persistence.ensure_schema()
-    task_ids = [_seed_task(persistence, priority=i) for i in range(5)]
+    task_ids = [_seed_task(persistence, priority=i + 1) for i in range(5)]
     barrier = threading.Barrier(10)
     results = []
     lock = threading.Lock()
