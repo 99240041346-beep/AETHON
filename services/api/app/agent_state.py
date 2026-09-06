@@ -34,14 +34,21 @@ class AgentStateStore:
             self._conn.execute(
                 "CREATE TABLE IF NOT EXISTS agent_state (task_id TEXT PRIMARY KEY, state_json TEXT NOT NULL, updated_at TEXT NOT NULL)"
             )
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS agent_controls (task_id TEXT PRIMARY KEY, pause_requested INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)"
+            )
             self._conn.commit()
         except Exception:
             self._conn = None
 
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
     def save(self, state: AgentState) -> AgentState:
         import json
 
-        state.updated_at = datetime.now(timezone.utc).isoformat()
+        state.updated_at = self._now()
         self._memory[state.task_id] = state
         if self._conn is not None:
             self._conn.execute(
@@ -65,9 +72,34 @@ class AgentStateStore:
                 return state
         return self._memory.get(key)
 
+    def request_pause(self, task_id: UUID | str) -> None:
+        key = str(task_id)
+        now = self._now()
+        if self._conn is not None:
+            self._conn.execute(
+                "INSERT INTO agent_controls(task_id,pause_requested,updated_at) VALUES(?,?,?) "
+                "ON CONFLICT(task_id) DO UPDATE SET pause_requested=1, updated_at=excluded.updated_at",
+                (key, 1, now),
+            )
+            self._conn.commit()
+
+    def pause_requested(self, task_id: UUID | str) -> bool:
+        key = str(task_id)
+        if self._conn is not None:
+            row = self._conn.execute("SELECT pause_requested FROM agent_controls WHERE task_id=?", (key,)).fetchone()
+            return bool(row and row[0])
+        return False
+
+    def clear_pause(self, task_id: UUID | str) -> None:
+        key = str(task_id)
+        if self._conn is not None:
+            self._conn.execute("DELETE FROM agent_controls WHERE task_id=?", (key,))
+            self._conn.commit()
+
     def delete(self, task_id: UUID | str) -> None:
         key = str(task_id)
         self._memory.pop(key, None)
         if self._conn is not None:
             self._conn.execute("DELETE FROM agent_state WHERE task_id=?", (key,))
+            self._conn.execute("DELETE FROM agent_controls WHERE task_id=?", (key,))
             self._conn.commit()
