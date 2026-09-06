@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from hashlib import sha256
 from urllib.parse import urlparse
 
@@ -13,7 +14,13 @@ class Evidence:
     source: str = "unknown"
     retrieved_at: str | None = None
     content_hash: str | None = None
-    trust_score: float = 0.0
+    trust_score: float | None = None
+
+    def __post_init__(self):
+        if self.retrieved_at is None:
+            object.__setattr__(self, "retrieved_at", datetime.now(timezone.utc).isoformat())
+        if self.trust_score is None:
+            object.__setattr__(self, "trust_score", source_trust_score(self.url))
 
     def normalized_url(self) -> str:
         parsed = urlparse(self.url)
@@ -26,7 +33,7 @@ class Evidence:
 
 
 def source_trust_score(url: str) -> float:
-    host = (urlparse(url).hostname or "").lower()
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
     if host.endswith(".gov") or host.endswith(".edu"):
         return 0.95
     if host.endswith(".org"):
