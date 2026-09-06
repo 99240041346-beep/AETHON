@@ -30,33 +30,24 @@ class TaskStore:
         with self._connect() as conn:
             conn.executescript("""
             CREATE TABLE IF NOT EXISTS tasks (
-                task_id TEXT PRIMARY KEY,
-                goal TEXT NOT NULL,
-                project_id TEXT,
-                priority INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                result_json TEXT,
-                error TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                task_id TEXT PRIMARY KEY, goal TEXT NOT NULL, project_id TEXT,
+                priority INTEGER NOT NULL, owner_id TEXT NOT NULL DEFAULT 'local-dev', status TEXT NOT NULL,
+                result_json TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS events (
-                event_id TEXT PRIMARY KEY,
-                task_id TEXT NOT NULL,
-                type TEXT NOT NULL,
-                data_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                event_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, type TEXT NOT NULL,
+                data_json TEXT NOT NULL, created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, created_at);
             CREATE TABLE IF NOT EXISTS audit_log (
-                audit_id TEXT PRIMARY KEY,
-                task_id TEXT,
-                action TEXT NOT NULL,
-                data_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                audit_id TEXT PRIMARY KEY, task_id TEXT, action TEXT NOT NULL,
+                data_json TEXT NOT NULL, created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_audit_task ON audit_log(task_id, created_at);
             """)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+            if "owner_id" not in columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local-dev'")
 
     @staticmethod
     def _now() -> str:
@@ -66,12 +57,11 @@ class TaskStore:
         now = self._now()
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO tasks(task_id,goal,project_id,priority,status,result_json,error,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?)
-                   ON CONFLICT(task_id) DO UPDATE SET goal=excluded.goal, project_id=excluded.project_id,
-                   priority=excluded.priority, status=excluded.status, result_json=excluded.result_json,
-                   error=excluded.error, updated_at=excluded.updated_at""",
-                (str(task.task_id), task.goal, task.project_id, task.priority, task.status.value,
+                """INSERT INTO tasks(task_id,goal,project_id,priority,owner_id,status,result_json,error,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET goal=excluded.goal,
+                   project_id=excluded.project_id, priority=excluded.priority, owner_id=excluded.owner_id,
+                   status=excluded.status, result_json=excluded.result_json, error=excluded.error, updated_at=excluded.updated_at""",
+                (str(task.task_id), task.goal, task.project_id, task.priority, task.owner_id, task.status.value,
                  json.dumps(task.result), task.error, now, now),
             )
 
@@ -79,18 +69,14 @@ class TaskStore:
         events = self.runtime.events.get(task_id, [])
         with self._connect() as conn:
             for event in events:
-                conn.execute(
-                    "INSERT OR IGNORE INTO events(event_id,task_id,type,data_json,created_at) VALUES(?,?,?,?,?)",
-                    (str(event.event_id), str(event.task_id), event.type, json.dumps(event.data), self._now()),
-                )
+                conn.execute("INSERT OR IGNORE INTO events(event_id,task_id,type,data_json,created_at) VALUES(?,?,?,?,?)",
+                    (str(event.event_id), str(event.task_id), event.type, json.dumps(event.data), self._now()))
                 if event.type.startswith("audit."):
-                    conn.execute(
-                        "INSERT OR IGNORE INTO audit_log(audit_id,task_id,action,data_json,created_at) VALUES(?,?,?,?,?)",
-                        (str(event.event_id), str(event.task_id), event.type[6:], json.dumps(event.data), self._now()),
-                    )
+                    conn.execute("INSERT OR IGNORE INTO audit_log(audit_id,task_id,action,data_json,created_at) VALUES(?,?,?,?,?)",
+                        (str(event.event_id), str(event.task_id), event.type[6:], json.dumps(event.data), self._now()))
 
     def create(self, request: TaskCreate) -> Task:
-        task = Task(goal=request.goal, project_id=request.project_id, priority=request.priority)
+        task = Task(goal=request.goal, project_id=request.project_id, priority=request.priority, owner_id=request.owner_id)
         self._persist_task(task)
         result = self.runtime.run(task)
         self._persist_task(result)
@@ -103,9 +89,8 @@ class TaskStore:
         if not row:
             return None
         return Task(task_id=UUID(row["task_id"]), goal=row["goal"], project_id=row["project_id"],
-                    priority=row["priority"], status=row["status"],
-                    result=json.loads(row["result_json"]) if row["result_json"] else None,
-                    error=row["error"])
+                    priority=row["priority"], owner_id=row["owner_id"], status=row["status"],
+                    result=json.loads(row["result_json"]) if row["result_json"] else None, error=row["error"])
 
     def events(self, task_id: UUID) -> list[Event]:
         with self._connect() as conn:
@@ -113,11 +98,9 @@ class TaskStore:
         return [Event(event_id=UUID(r["event_id"]), task_id=UUID(r["task_id"]), type=r["type"], data=json.loads(r["data_json"])) for r in rows]
 
     def audit(self, task_id: UUID | None = None) -> list[dict]:
-        query = "SELECT * FROM audit_log"
-        args = ()
+        query = "SELECT * FROM audit_log"; args = ()
         if task_id is not None:
-            query += " WHERE task_id=?"
-            args = (str(task_id),)
+            query += " WHERE task_id=?"; args = (str(task_id),)
         query += " ORDER BY created_at"
         with self._connect() as conn:
             rows = conn.execute(query, args).fetchall()
