@@ -1,5 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from typing import Annotated
 from uuid import UUID
+
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
+
+from aethon.auth import current_owner, security
 from aethon.schemas import TaskCreate, Task, ToolRequest
 from aethon.store import TaskStore
 from aethon.tools import ToolRegistry
@@ -14,13 +19,17 @@ tools = ToolRegistry()
 safety = SafetyKernel()
 model_router = ModelRouter()
 
+
+def owner(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> str:
+    return current_owner(credentials)
+
 @app.get('/health')
 def health():
     return {'ok': True, 'service': 'aethon-api'}
 
 @app.get('/ready')
 def ready():
-    return {'ok': True, 'persistence': 'sqlite'}
+    return {'ok': True, 'persistence': 'sqlite' if not store.runtime.memory.use_postgres else 'postgresql'}
 
 @app.get('/v1/model/health')
 def model_health():
@@ -41,23 +50,23 @@ def execute_tool(request: ToolRequest):
     return tools.execute(request)
 
 @app.post('/v1/memory')
-def create_memory(request: MemoryWriteRequest):
+def create_memory(request: MemoryWriteRequest, owner_id: str = Depends(owner)):
     try:
-        return write_memory(request)
+        return write_memory(request, owner_id=owner_id)
     except MemorySecurityError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 @app.post('/v1/memory/search')
-def search_memories(request: MemorySearchRequest):
+def search_memories(request: MemorySearchRequest, owner_id: str = Depends(owner)):
     try:
-        return search_memory(request)
+        return search_memory(request, owner_id=owner_id)
     except MemorySecurityError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 @app.delete('/v1/memory/{memory_id}')
-def remove_memory(memory_id: str, request: MemoryDeleteRequest):
+def remove_memory(memory_id: str, request: MemoryDeleteRequest, owner_id: str = Depends(owner)):
     try:
-        deleted = delete_memory(memory_id, request)
+        deleted = delete_memory(memory_id, request, owner_id=owner_id)
         if not deleted:
             raise HTTPException(404, 'memory not found in authorized scope')
         return {'ok': True, 'memory_id': memory_id}
@@ -65,31 +74,34 @@ def remove_memory(memory_id: str, request: MemoryDeleteRequest):
         raise HTTPException(400, str(exc)) from exc
 
 @app.post('/v1/tasks', response_model=Task)
-def create_task(request: TaskCreate):
+def create_task(request: TaskCreate, owner_id: str = Depends(owner)):
+    request = request.model_copy(update={'owner_id': owner_id})
     return store.create(request)
 
 @app.get('/v1/tasks/{task_id}', response_model=Task)
-def get_task(task_id: UUID):
+def get_task(task_id: UUID, owner_id: str = Depends(owner)):
     task = store.get(task_id)
-    if not task:
+    if not task or task.owner_id != owner_id:
         raise HTTPException(404, 'task not found')
     return task
 
 @app.get('/v1/tasks/{task_id}/events', response_model=list)
-def get_events(task_id: UUID):
-    if not store.get(task_id):
+def get_events(task_id: UUID, owner_id: str = Depends(owner)):
+    task = store.get(task_id)
+    if not task or task.owner_id != owner_id:
         raise HTTPException(404, 'task not found')
     return store.events(task_id)
 
 @app.get('/v1/tasks/{task_id}/audit', response_model=list)
-def get_audit(task_id: UUID):
-    if not store.get(task_id):
+def get_audit(task_id: UUID, owner_id: str = Depends(owner)):
+    task = store.get(task_id)
+    if not task or task.owner_id != owner_id:
         raise HTTPException(404, 'task not found')
     return store.audit(task_id)
 
 @app.post('/v1/tasks/{task_id}/cancel', response_model=Task)
-def cancel_task(task_id: UUID):
-    task = store.cancel(task_id)
-    if not task:
+def cancel_task(task_id: UUID, owner_id: str = Depends(owner)):
+    task = store.get(task_id)
+    if not task or task.owner_id != owner_id:
         raise HTTPException(404, 'task not found')
-    return task
+    return store.cancel(task_id)
