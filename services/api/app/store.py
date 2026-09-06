@@ -107,11 +107,17 @@ class TaskStore:
         with self._future_lock:
             self._futures.pop(task_id, None)
 
-    def _recover_tasks(self) -> None:
-        """Recover queued work and abandoned active work after restart.
+    def _lease_is_live(self, task_id: UUID) -> bool:
+        lease = self.lease_store.get(str(task_id))
+        return bool(lease and not lease["expired"])
 
-        PAUSED and AWAITING_APPROVAL require explicit user action and are not
-        automatically resumed.
+    def _recover_tasks(self) -> None:
+        """Recover only work that is not currently owned by a live worker.
+
+        Queued work is safe to admit when it has no live lease. Active work is
+        recovered only when its previous lease is absent or expired and a
+        persisted checkpoint exists. PAUSED and AWAITING_APPROVAL are never
+        auto-resumed.
         """
         recoverable = {
             TaskStatus.QUEUED.value,
@@ -128,16 +134,18 @@ class TaskStore:
             ).fetchall()
         for row in rows:
             task_id = UUID(row["task_id"])
+            if self._lease_is_live(task_id):
+                continue
             state = self.state_store.load(task_id)
             if row["status"] != TaskStatus.QUEUED.value and state is None:
                 continue
             task = Task(task_id=task_id, goal=row["goal"], project_id=row["project_id"],
                         priority=row["priority"], owner_id=row["owner_id"], status=TaskStatus.QUEUED)
-            self._persist_task(task)
             try:
                 future = self._submit(task)
             except RuntimeError:
                 break
+            self._persist_task(task)
             self.runtime._event(task, "task.recovered", {
                 "scheduler": "bounded-thread-pool",
                 "worker_id": self.worker_id,
