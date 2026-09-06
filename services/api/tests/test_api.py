@@ -23,7 +23,7 @@ def test_task_vertical_slice_and_audit():
         assert result.status.value == 'SUCCEEDED'
         assert 'AETHON received' in result.result
         events = store.events(result.task_id)
-        assert [e.data.get('status') for e in events if e.type == 'task.state_changed'] == ['PLANNING', 'EXECUTING', 'VERIFYING', 'SUCCEEDED']
+        assert [e.data.get('status') for e in events if e.type == 'task.state_changed'] == ['PLANNING', 'EXECUTING', 'VERIFYING', 'EXECUTING', 'SUCCEEDED']
         audit = store.audit(result.task_id)
         assert any(e['action'] == 'verification' and e['data']['ok'] is True for e in audit)
 
@@ -36,8 +36,8 @@ def test_verification_failure_blocks_success():
     from aethon.schemas import Task
     runtime = AgentRuntime(verifier=AlwaysFailVerifier())
     task = runtime.run(Task(goal='must fail verification'))
-    assert task.status.value == 'FAILED'
-    assert 'verification failed' in task.error
+    assert task.status.value == 'BLOCKED'
+    assert 'replan budget exhausted' in task.error
 
 
 def test_persistence_survives_new_store_instance():
