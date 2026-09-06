@@ -5,10 +5,14 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Callable, Generic, Iterable, TypeVar
+from typing import Callable, Generic, Iterable, Protocol, TypeVar
 
 T = TypeVar("T")
 R = TypeVar("R")
+
+
+class _LeasedPool(Protocol[T, R]):
+    def run(self, task_id: str, task: T) -> R: ...
 
 
 @dataclass
@@ -23,9 +27,9 @@ class _Queued(Generic[T]):
 
 
 class TaskScheduler(Generic[T, R]):
-    """Bounded priority scheduler with dependency-aware admission and resource quotas."""
+    """Bounded priority scheduler with optional durable worker-lease execution."""
 
-    def __init__(self, worker: Callable[[T], R], max_workers: int | None = None, max_queue: int | None = None, resource_limits: dict[str, int] | None = None, aging_seconds: float | None = None):
+    def __init__(self, worker: Callable[[T], R], max_workers: int | None = None, max_queue: int | None = None, resource_limits: dict[str, int] | None = None, aging_seconds: float | None = None, worker_pool: _LeasedPool[T, R] | None = None, lease_key: Callable[[T], str] | None = None):
         configured = max_workers or int(os.getenv("AETHON_MAX_CONCURRENT_TASKS", "4"))
         queue_limit = max_queue if max_queue is not None else int(os.getenv("AETHON_MAX_QUEUED_TASKS", "100"))
         aging = aging_seconds if aging_seconds is not None else float(os.getenv("AETHON_SCHEDULER_AGING_SECONDS", "30"))
@@ -35,6 +39,8 @@ class TaskScheduler(Generic[T, R]):
             raise ValueError("max_queue must be >= 1")
         if aging <= 0:
             raise ValueError("aging_seconds must be > 0")
+        if worker_pool is not None and lease_key is None:
+            raise ValueError("lease_key is required when worker_pool is configured")
         limits = dict(resource_limits or {})
         if any(not name or amount < 1 for name, amount in limits.items()):
             raise ValueError("resource limits must be positive")
@@ -43,6 +49,8 @@ class TaskScheduler(Generic[T, R]):
         self.aging_seconds = aging
         self.resource_limits = limits
         self._worker = worker
+        self._worker_pool = worker_pool
+        self._lease_key = lease_key
         self._executor = ThreadPoolExecutor(max_workers=configured, thread_name_prefix="aethon-agent")
         self._condition = threading.Condition()
         self._queue: list[_Queued[T]] = []
@@ -81,7 +89,7 @@ class TaskScheduler(Generic[T, R]):
 
     def snapshot(self) -> dict[str, object]:
         with self._condition:
-            return {"queued": len(self._queue), "active": self._active, "max_workers": self.max_workers, "max_queue": self.max_queue, "aging_seconds": self.aging_seconds, "resource_limits": dict(self.resource_limits), "resources_in_use": dict(self._resources_in_use)}
+            return {"queued": len(self._queue), "active": self._active, "max_workers": self.max_workers, "max_queue": self.max_queue, "aging_seconds": self.aging_seconds, "resource_limits": dict(self.resource_limits), "resources_in_use": dict(self._resources_in_use), "leased_execution": self._worker_pool is not None}
 
     def shutdown(self, wait: bool = True) -> None:
         with self._condition:
@@ -155,6 +163,11 @@ class TaskScheduler(Generic[T, R]):
         if queued.future.cancelled():
             return
         try:
-            queued.future.set_result(self._worker(queued.item))
+            if self._worker_pool is not None:
+                assert self._lease_key is not None
+                result = self._worker_pool.run(self._lease_key(queued.item), queued.item)
+            else:
+                result = self._worker(queued.item)
+            queued.future.set_result(result)
         except BaseException as exc:
             queued.future.set_exception(exc)
