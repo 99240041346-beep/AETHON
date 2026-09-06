@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import threading
-import time
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -40,14 +39,33 @@ class DistributedWorker:
     def execute_claim(self, claimed: ClaimedTask) -> WorkerResult:
         task = Task(task_id=claimed.task_id, goal=claimed.goal, project_id=claimed.project_id,
                     owner_id=claimed.owner_id, priority=claimed.priority, status=TaskStatus.QUEUED)
+        heartbeat_stop = threading.Event()
+        heartbeat_lost = threading.Event()
+
+        def heartbeat() -> None:
+            interval = max(0.1, min(self.lease_seconds / 3.0, self.lease_seconds))
+            while not heartbeat_stop.wait(interval):
+                if not self.persistence.heartbeat_lease(
+                    claimed.task_id, self.worker_id, claimed.lease_token, self.lease_seconds
+                ):
+                    heartbeat_lost.set()
+                    return
+
+        heartbeat_thread = threading.Thread(target=heartbeat, name=f"aethon-heartbeat-{claimed.task_id}", daemon=True)
+        heartbeat_thread.start()
         try:
             result = self.runtime.run(task)
+            if heartbeat_lost.is_set():
+                raise RuntimeError("task lease was lost during execution")
             self._persist_result(result, claimed.lease_token)
             self.persistence.release_lease(claimed.task_id, self.worker_id, claimed.lease_token)
             return WorkerResult(claimed.task_id, result.status.value, result.error)
         except BaseException as exc:
             self._mark_failed(claimed, exc)
             return WorkerResult(claimed.task_id, TaskStatus.FAILED.value, str(exc))
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=max(0.1, self.lease_seconds / 3.0))
 
     def poll_once(self) -> WorkerResult | None:
         claimed = self.claim()
