@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
+from concurrent.futures import Future
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -23,6 +25,8 @@ class TaskStore:
         self.state_store = AgentStateStore(str(self.database_path.with_name(self.database_path.stem + "_agent_state.db")))
         self.runtime = AgentRuntime(state_store=self.state_store)
         self.scheduler = TaskScheduler(self.runtime.run)
+        self._futures: dict[UUID, Future] = {}
+        self._future_lock = threading.Lock()
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -79,17 +83,31 @@ class TaskStore:
                     conn.execute("INSERT OR IGNORE INTO audit_log(audit_id,task_id,action,data_json,created_at) VALUES(?,?,?,?,?)",
                         (str(event.event_id), str(event.task_id), event.type[6:], json.dumps(event.data), self._now()))
 
+    def _submit(self, task: Task) -> Future:
+        future = self.scheduler.submit(task, priority=task.priority)
+        with self._future_lock:
+            self._futures[task.task_id] = future
+        return future
+
+    def _forget_future(self, task_id: UUID) -> None:
+        with self._future_lock:
+            self._futures.pop(task_id, None)
+
     def create(self, request: TaskCreate) -> Task:
         task = Task(goal=request.goal, project_id=request.project_id, priority=request.priority, owner_id=request.owner_id)
         self._persist_task(task)
         self.runtime._event(task, "task.queued", {"priority": task.priority, "scheduler": "bounded-thread-pool"})
         self._persist_events(task.task_id)
-        result = self.scheduler.submit_and_wait(task, priority=task.priority)
+        future = self._submit(task)
+        try:
+            result = future.result()
+        finally:
+            self._forget_future(task.task_id)
         self._persist_task(result)
         self._persist_events(result.task_id)
         return result
 
-    def scheduler_status(self) -> dict[str, int]:
+    def scheduler_status(self) -> dict[str, object]:
         return self.scheduler.snapshot()
 
     def get(self, task_id: UUID) -> Task | None:
@@ -140,7 +158,11 @@ class TaskStore:
             raise ValueError("no persisted agent state exists for task")
         self.state_store.clear_pause(task_id)
         task.error = None
-        result = self.scheduler.submit_and_wait(task, priority=task.priority)
+        future = self._submit(task)
+        try:
+            result = future.result()
+        finally:
+            self._forget_future(task.task_id)
         self._persist_task(result)
         self._persist_events(result.task_id)
         return result
@@ -149,8 +171,16 @@ class TaskStore:
         task = self.get(task_id)
         if task is None:
             return None
-        if task.status not in {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED}:
-            task.status = TaskStatus.CANCELLED
-            self.state_store.clear_pause(task_id)
-            self._persist_task(task)
+        if task.status in {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED}:
+            return task
+        self.state_store.request_cancel(task_id)
+        with self._future_lock:
+            future = self._futures.get(task_id)
+        if future is not None and future.cancel():
+            self.runtime._event(task, "task.cancelled", {"queued": True})
+        else:
+            self.runtime._event(task, "task.cancel_requested", {"running": True})
+        task.status = TaskStatus.CANCELLED
+        self._persist_task(task)
+        self._persist_events(task_id)
         return task
