@@ -258,12 +258,14 @@ Security controls include least privilege, credential isolation, sandboxing, res
 
 ## 11. Scheduler Contract
 
-AETHON-0 uses a bounded in-process priority scheduler as its first concurrency implementation:
+AETHON-0 uses a bounded in-process scheduler as its first concurrency implementation:
 
 ```text
 Task request
     ↓
-Priority queue
+Priority + dependency admission
+    ↓
+Resource quotas
     ↓
 N bounded workers
  ┌──────┬──────┬──────┐
@@ -276,13 +278,17 @@ Durable task/agent checkpoints
 Rules:
 
 - lower numeric priority executes first
-- equal priority is FIFO
+- equal priority is FIFO among eligible tasks
+- tasks may depend on previously submitted scheduler futures
+- a dependent task cannot start until all dependencies succeed
+- independent ready work can bypass a blocked dependency
+- resource requests are admitted only when the configured quota is available
+- a request exceeding a declared quota is rejected at admission
 - `AETHON_MAX_CONCURRENT_TASKS` caps active workers
 - scheduler admission never bypasses Safety Kernel authorization
 - worker failures propagate to the task's normal recovery path
-- dependency-aware scheduling is exposed at the scheduler primitive and can be extended to task DAGs without weakening security
 
-The current implementation intentionally uses a bounded thread pool rather than introducing Redis/Kubernetes before the workload requires distributed coordination.
+The current implementation intentionally uses a bounded thread pool rather than introducing Redis/Kubernetes before the workload requires distributed coordination. The dependency and resource interfaces are designed to survive a later move to a durable distributed queue.
 
 ## 12. API Boundary
 
@@ -346,7 +352,7 @@ Initial production-oriented direction:
 - Redis only for transient queues/cache/coordination when justified
 - object storage for large artifacts
 
-The current AETHON-0 scheduler is intentionally local and bounded. A later distributed scheduler can preserve the same task/checkpoint contracts while moving queue ownership and worker leases into durable infrastructure.
+The current AETHON-0 scheduler is intentionally local and bounded. A later distributed scheduler can preserve the same task/checkpoint contracts while moving queue ownership, dependency state, resource leases, and worker heartbeats into durable infrastructure.
 
 ## 15. Repository Mapping
 
@@ -395,6 +401,8 @@ AETHON must distinguish:
 - unavailable dependency
 - policy block
 - scheduler shutdown/admission failure
+- dependency failure
+- resource quota exhaustion
 
 Retries must be bounded and must not repeat non-idempotent side effects without explicit protection.
 
