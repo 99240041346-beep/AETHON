@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from pydantic import BaseModel, Field
 
-from aethon.memory_engine import PersistentMemoryEngine, MemorySecurityError
+from aethon.memory_engine import MemorySecurityError, default_memory_engine
 
 
 class MemoryWriteRequest(BaseModel):
@@ -29,7 +29,7 @@ class MemoryDeleteRequest(BaseModel):
     namespace: str = "default"
 
 
-memory_engine = PersistentMemoryEngine()
+memory_engine = default_memory_engine
 
 
 def write_memory(request: MemoryWriteRequest) -> dict[str, Any]:
