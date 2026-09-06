@@ -29,7 +29,12 @@ def health():
 
 @app.get('/ready')
 def ready():
-    return {'ok': True, 'persistence': 'sqlite' if not store.runtime.memory.use_postgres else 'postgresql'}
+    scheduler = store.scheduler_status()
+    return {'ok': True, 'persistence': 'sqlite' if not store.runtime.memory.use_postgres else 'postgresql', 'scheduler': scheduler}
+
+@app.get('/v1/scheduler')
+def scheduler_status(owner_id: str = Depends(owner)):
+    return {'ok': True, **store.scheduler_status()}
 
 @app.get('/v1/model/health')
 def model_health():
