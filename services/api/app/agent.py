@@ -13,11 +13,7 @@ from aethon.web_runtime import WebAwareVerifier
 
 
 class AgentRuntime:
-    """Bounded Agent Brain execution runtime.
-
-    The brain controls planning/dependencies/retries; tools remain behind the
-    SafetyKernel and model output is treated as untrusted data.
-    """
+    """Bounded Agent Brain execution runtime with adaptive recovery."""
 
     def __init__(
         self,
@@ -54,16 +50,22 @@ class AgentRuntime:
         self._emit_plan(task, plan, "plan.created")
         self._transition(task, TaskStatus.EXECUTING)
 
-        observations: list[str] = []
+        # Observations are durable for this task run and are deliberately kept
+        # separate from the plan so replanning can preserve useful evidence.
+        observations: list[object] = []
         answer = None
-        for _ in range(self.brain.max_steps + self.brain.max_replans + 1):
+        for _ in range(self.brain.max_steps + self.brain.max_replans + 2):
             if task.status == TaskStatus.CANCELLED:
                 self._event(task, "task.cancelled", {})
                 return task
 
             decision = self.brain.next_decision(plan)
-            self._event(task, "brain.decision", {"action": decision.action, "reason": decision.reason,
-                                                  "step_id": decision.step.step_id if decision.step else None})
+            self._event(task, "brain.decision", {
+                "action": decision.action,
+                "reason": decision.reason,
+                "step_id": decision.step.step_id if decision.step else None,
+                "revision": plan.revision,
+            })
             if decision.action == "FINISH":
                 break
             if decision.action == "BLOCK":
@@ -79,18 +81,20 @@ class AgentRuntime:
                 return task
 
             step = decision.step
-            self._event(task, "plan.step.started", {"step_id": step.step_id, "kind": step.kind.value,
-                                                      "description": step.description, "attempt": step.attempts + 1})
+            self._event(task, "plan.step.started", {
+                "step_id": step.step_id, "kind": step.kind.value,
+                "description": step.description, "attempt": step.attempts + 1,
+            })
             self._transition(task, TaskStatus.EXECUTING)
             try:
                 if step.kind == StepKind.TOOL:
                     output = self._execute_tool(task, step.tool, step.arguments)
-                    observations.append(f"{step.step_id}: {output}")
+                    observations.append(output)
                     answer = output
                 elif step.kind == StepKind.REASON:
                     prompt = self._reason_prompt(task.goal, context, observations, step.description)
                     answer = self.models.generate(prompt)
-                    observations.append(f"{step.step_id}: {answer}")
+                    observations.append(answer)
                 elif step.kind == StepKind.VERIFY:
                     candidate = answer or (observations[-1] if observations else "")
                     self._transition(task, TaskStatus.VERIFYING)
@@ -100,19 +104,21 @@ class AgentRuntime:
                         "reason": verification.reason, "evidence": verification.evidence,
                     })
                     if not verification.ok:
-                        replanned = self.brain.record_failure(plan, step.step_id, verification.reason)
-                        self._emit_replan(task, plan, replanned)
+                        replanned = self._replan(task, plan, step, verification.reason, observations)
                         if replanned.action == "FAIL":
                             task.status = TaskStatus.FAILED
                             task.error = f"verification failed: {verification.reason}"
                             self._audit(task, "task_failed", {"reason": task.error})
                             return task
                         continue
+
                 self.brain.record_success(plan, step.step_id)
-                self._event(task, "plan.step.completed", {"step_id": step.step_id, "attempts": step.attempts + 1})
+                self._event(task, "plan.step.completed", {
+                    "step_id": step.step_id, "attempts": step.attempts,
+                    "completed_steps": list(plan.completed_steps),
+                })
             except Exception as exc:
-                replanned = self.brain.record_failure(plan, step.step_id, str(exc))
-                self._emit_replan(task, plan, replanned)
+                replanned = self._replan(task, plan, step, str(exc), observations)
                 if replanned.action == "FAIL":
                     task.status = TaskStatus.FAILED
                     task.error = str(exc)
@@ -123,7 +129,7 @@ class AgentRuntime:
         if decision.action != "FINISH":
             task.status = TaskStatus.BLOCKED
             task.error = "execution budget exhausted"
-            self._event(task, "task.blocked", {"reason": task.error})
+            self._event(task, "task.blocked", {"reason": task.error, "revision": plan.revision})
             return task
 
         task.result = answer
@@ -137,8 +143,20 @@ class AgentRuntime:
             "namespace": record.namespace, "memory_id": record.memory_id,
         })
         self._transition(task, TaskStatus.SUCCEEDED)
-        self._audit(task, "task_succeeded", {"verified": True, "plan_revision": plan.revision})
+        self._audit(task, "task_succeeded", {
+            "verified": True, "plan_revision": plan.revision,
+            "completed_steps": list(plan.completed_steps),
+        })
         return task
+
+    def _replan(self, task, plan: Plan, step, reason: str, observations: list[object]) -> BrainDecision:
+        decision = self.brain.replan(
+            plan, step.step_id, reason,
+            available_tools={spec.name for spec in self.tools.list()},
+            observations=observations,
+        )
+        self._emit_replan(task, plan, decision)
+        return decision
 
     def _execute_tool(self, task: Task, tool_name: str | None, arguments: dict) -> object:
         if not tool_name:
@@ -147,21 +165,27 @@ class AgentRuntime:
         if not spec:
             raise ValueError(f"tool not found: {tool_name}")
         decision = self.safety.authorize(spec.risk, spec.side_effects)
-        self._event(task, "tool.authorization", {"tool": tool_name, "decision": decision,
-                                                  "risk": spec.risk.value, "side_effects": spec.side_effects})
+        self._event(task, "tool.authorization", {
+            "tool": tool_name, "decision": decision,
+            "risk": spec.risk.value, "side_effects": spec.side_effects,
+        })
         if decision == "DENY":
             raise PermissionError(f"tool denied by safety policy: {tool_name}")
         if decision == "APPROVAL_REQUIRED":
             task.status = TaskStatus.AWAITING_APPROVAL
             raise PermissionError(f"approval required for tool: {tool_name}")
         result = self.tools.execute(ToolRequest(tool=tool_name, arguments=arguments))
-        self._event(task, "tool.observed", {"tool": tool_name, "ok": result.ok})
+        self._event(task, "tool.observed", {
+            "tool": tool_name, "ok": result.ok,
+            "output_type": type(result.output).__name__ if result.ok else None,
+            "error": result.error if not result.ok else None,
+        })
         if not result.ok:
             raise RuntimeError(result.error or f"tool failed: {tool_name}")
         return result.output
 
     @staticmethod
-    def _reason_prompt(goal: str, context, observations: list[str], step: str) -> str:
+    def _reason_prompt(goal: str, context, observations: list[object], step: str) -> str:
         memory_text = "\n".join(f"- {item.content}" for item in context)
         observation_text = "\n".join(f"- {item}" for item in observations[-8:])
         return (
@@ -172,21 +196,32 @@ class AgentRuntime:
         )
 
     def _emit_plan(self, task: Task, plan: Plan, event_type: str) -> None:
-        self._event(task, event_type, {"revision": plan.revision, "goal": plan.goal,
-                                       "steps": [self._step_data(step) for step in plan.steps]})
+        self._event(task, event_type, {
+            "revision": plan.revision, "goal": plan.goal,
+            "steps": [self._step_data(step) for step in plan.steps],
+            "completed_steps": list(plan.completed_steps),
+            "recovery_history": list(plan.recovery_history),
+        })
 
     def _emit_replan(self, task: Task, plan: Plan, decision: BrainDecision) -> None:
         self._transition(task, TaskStatus.REPLANNING)
-        self._event(task, "plan.replanned", {"revision": plan.revision, "action": decision.action,
-                                              "reason": decision.reason,
-                                              "step_id": decision.step.step_id if decision.step else None,
-                                              "steps": [self._step_data(step) for step in plan.steps]})
+        self._event(task, "plan.replanned", {
+            "revision": plan.revision, "action": decision.action,
+            "reason": decision.reason,
+            "step_id": decision.step.step_id if decision.step else None,
+            "steps": [self._step_data(step) for step in plan.steps],
+            "completed_steps": list(plan.completed_steps),
+            "recovery_history": list(plan.recovery_history),
+        })
 
     @staticmethod
     def _step_data(step) -> dict:
-        return {"step_id": step.step_id, "description": step.description, "kind": step.kind.value,
-                "tool": step.tool, "depends_on": step.depends_on, "attempts": step.attempts,
-                "max_attempts": step.max_attempts, "status": step.status}
+        return {
+            "step_id": step.step_id, "description": step.description,
+            "kind": step.kind.value, "tool": step.tool,
+            "depends_on": step.depends_on, "attempts": step.attempts,
+            "max_attempts": step.max_attempts, "status": step.status,
+        }
 
     def _transition(self, task, status):
         task.status = status
