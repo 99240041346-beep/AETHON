@@ -53,9 +53,6 @@ class AgentRuntime:
             self._checkpoint(task, plan, observations, "RUNNING")
             self._transition(task, TaskStatus.EXECUTING)
 
-        if task.status == TaskStatus.QUEUED:
-            self._transition(task, TaskStatus.EXECUTING)
-
         for _ in range(self.brain.max_steps + self.brain.max_replans + 2):
             if task.status == TaskStatus.CANCELLED:
                 self._checkpoint(task, plan, observations, "CANCELLED")
