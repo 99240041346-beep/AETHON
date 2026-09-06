@@ -2,18 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from typing import Any
 
 from aethon.memory_engine import MemoryRecord, PersistentMemoryEngine, validate_namespace, redact_secrets, MemorySecurityError
 
 
 class MemoryRepository:
-    """Memory persistence boundary.
-
-    PostgreSQL is used when AETHON_DATABASE_URL is configured. The deterministic
-    in-process engine remains available for local development and unit tests.
-    """
+    """Memory persistence boundary with PostgreSQL durability and local fallback."""
 
     def __init__(self, database_url: str | None = None, fallback: PersistentMemoryEngine | None = None):
         self.database_url = database_url or os.getenv("AETHON_DATABASE_URL")
@@ -31,13 +26,12 @@ class MemoryRepository:
 
     @staticmethod
     def _row_to_record(row: tuple[Any, ...]) -> MemoryRecord:
-        return MemoryRecord(
-            memory_id=str(row[0]), content=row[1], namespace=row[2], project_id=row[3],
+        return MemoryRecord(memory_id=str(row[0]), content=row[1], namespace=row[2], project_id=row[3],
             memory_type=row[4], source=row[5], confidence=float(row[6]),
             created_at=row[7].isoformat() if hasattr(row[7], "isoformat") else str(row[7]),
             updated_at=row[8].isoformat() if hasattr(row[8], "isoformat") else str(row[8]),
             expires_at=row[9].isoformat() if row[9] is not None and hasattr(row[9], "isoformat") else row[9],
-        )
+            owner_id=str(row[10]) if len(row) > 10 else "local-dev")
 
     def put(self, memory_id: str, content: str, *, owner_id: str = "local-dev", project_id: str | None = None,
             namespace: str = "default", memory_type: str = "semantic", source: str = "agent",
@@ -51,9 +45,9 @@ class MemoryRepository:
             raise MemorySecurityError("confidence must be between 0 and 1")
         safe_content = redact_secrets(content.strip())
         if not self.use_postgres:
-            return self.fallback.put(memory_id, safe_content, project_id=project_id, namespace=namespace,
-                                     memory_type=memory_type, source=source, confidence=confidence,
-                                     expires_at=expires_at)
+            return self.fallback.put(memory_id, safe_content, owner_id=owner_id, project_id=project_id,
+                namespace=namespace, memory_type=memory_type, source=source, confidence=confidence,
+                expires_at=expires_at)
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO memories(memory_id, owner_id, project_id, namespace, content, metadata,
@@ -64,7 +58,7 @@ class MemoryRepository:
                    metadata=EXCLUDED.metadata, confidence=EXCLUDED.confidence, source=EXCLUDED.source,
                    memory_type=EXCLUDED.memory_type, expires_at=EXCLUDED.expires_at, updated_at=NOW()
                    RETURNING memory_id, content, namespace, project_id, memory_type, source,
-                   confidence, created_at, updated_at, expires_at""",
+                   confidence, created_at, updated_at, expires_at, owner_id""",
                 (memory_id, owner_id, project_id, namespace, safe_content, json.dumps({"owner_id": owner_id}),
                  confidence, source, memory_type, expires_at),
             )
@@ -77,14 +71,14 @@ class MemoryRepository:
         namespace = validate_namespace(namespace)
         limit = max(1, min(limit, 100))
         if not self.use_postgres:
-            return self.fallback.search(query, project_id=project_id, namespace=namespace, limit=limit)
+            return self.fallback.search(query, owner_id=owner_id, project_id=project_id, namespace=namespace, limit=limit)
         terms = [term for term in query.lower().split() if term]
         if not terms:
             return []
         clauses = " OR ".join(["content ILIKE %s" for _ in terms])
         values: list[Any] = [owner_id, project_id, namespace, *[f"%{term}%" for term in terms]]
         sql = f"""SELECT memory_id, content, namespace, project_id, memory_type, source,
-                  confidence, created_at, updated_at, expires_at
+                  confidence, created_at, updated_at, expires_at, owner_id
                   FROM memories WHERE owner_id=%s AND project_id IS NOT DISTINCT FROM %s
                   AND namespace=%s AND (expires_at IS NULL OR expires_at > NOW())
                   AND ({clauses}) ORDER BY confidence DESC, updated_at DESC LIMIT %s"""
@@ -99,10 +93,8 @@ class MemoryRepository:
             raise MemorySecurityError("owner_id is required")
         namespace = validate_namespace(namespace)
         if not self.use_postgres:
-            return self.fallback.delete(memory_id, project_id=project_id, namespace=namespace)
+            return self.fallback.delete(memory_id, owner_id=owner_id, project_id=project_id, namespace=namespace)
         with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                "DELETE FROM memories WHERE memory_id=%s AND owner_id=%s AND project_id IS NOT DISTINCT FROM %s AND namespace=%s",
-                (memory_id, owner_id, project_id, namespace),
-            )
+            cur.execute("DELETE FROM memories WHERE memory_id=%s AND owner_id=%s AND project_id IS NOT DISTINCT FROM %s AND namespace=%s",
+                (memory_id, owner_id, project_id, namespace))
             return cur.rowcount == 1
