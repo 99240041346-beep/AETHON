@@ -83,17 +83,50 @@ Returns task lifecycle and audit-safe execution events in chronological order.
 
 Returns tools visible to the authenticated project/user, including permission and risk metadata. Secrets and credentials are never returned.
 
+### `POST /v1/memory`
+
+Creates or replaces a memory record inside the explicitly supplied project/namespace scope. Content is validated and secrets are redacted before storage.
+
+```json
+{
+  "memory_id": "string",
+  "content": "string",
+  "project_id": "string",
+  "namespace": "project",
+  "memory_type": "semantic",
+  "source": "user",
+  "confidence": 0.9,
+  "expires_at": null
+}
+```
+
 ### `POST /v1/memory/search`
 
-Searches only within scopes the caller is authorized to access.
+Searches only within the requested project and namespace. Results include provenance, confidence, and retention metadata.
 
 ```json
 {
   "query": "string",
   "project_id": "string",
+  "namespace": "project",
   "limit": 10
 }
 ```
+
+### `DELETE /v1/memory/{memory_id}`
+
+Deletes a memory only when the supplied project and namespace match the stored record. A mismatched scope is treated as not found.
+
+```json
+{
+  "project_id": "string",
+  "namespace": "project"
+}
+```
+
+## Agent Memory Integration
+
+Before model reasoning, the task runtime retrieves at most five relevant records from the task's project namespace. Retrieved memory is explicitly passed as context, never as authority or executable instructions. After successful verification, the task result may be stored as episodic memory through the same redaction and scope controls.
 
 ## Idempotency
 
@@ -108,3 +141,5 @@ Task creation and side-effecting API operations should support an idempotency ke
 - Never accept a client-supplied permission escalation.
 - Never expose model/provider credentials.
 - Record security-relevant decisions.
+- Treat memory as context, not authority.
+- Enforce project and namespace isolation on every memory operation.
