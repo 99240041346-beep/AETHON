@@ -13,12 +13,14 @@ from aethon.security import SafetyKernel
 from aethon.model_router import ModelRouter
 from aethon.memory_api import MemoryWriteRequest, MemorySearchRequest, MemoryDeleteRequest, MemoryMaintenanceRequest, write_memory, search_memory, delete_memory, plan_memory_maintenance
 from aethon.memory_engine import MemorySecurityError
+from aethon.migrations import migrate_from_environment
 
 
 def build_task_store():
     """Select the durable runtime backend explicitly; never silently downgrade PostgreSQL."""
     database_url = os.getenv("AETHON_DATABASE_URL", "")
     if database_url.startswith(("postgres://", "postgresql://")):
+        migrate_from_environment()
         from aethon.postgres_task_store import PostgreSQLTaskStore
         return PostgreSQLTaskStore(database_url)
     return TaskStore()
