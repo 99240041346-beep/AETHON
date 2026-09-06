@@ -1,7 +1,8 @@
 import ast
 import operator as op
 from aethon.schemas import ToolResult, ToolSpec, RiskClass
-from aethon.web import WebFetcher, WebSearch
+from aethon.web import WebFetcher
+from aethon.web_search import WebSearch
 
 
 class CalculatorTool:
