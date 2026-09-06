@@ -4,21 +4,24 @@ from aethon.main import app
 client = TestClient(app)
 
 
-def test_memory_write_search_and_delete():
+def test_memory_write_search_and_secret_redaction():
     payload = {
         'memory_id': 'api-test-memory',
-        'content': 'AETHON project uses persistent memory',
+        'content': 'AETHON project uses persistent memory. API_KEY=super-secret-value',
         'project_id': 'api-project',
         'namespace': 'project',
         'confidence': 0.9,
     }
     created = client.post('/v1/memory', json=payload)
     assert created.status_code == 200
+    assert 'super-secret-value' not in created.json()['content']
+
     found = client.post('/v1/memory/search', json={
         'query': 'persistent memory', 'project_id': 'api-project', 'namespace': 'project'
     })
     assert found.status_code == 200
     assert found.json()[0]['memory_id'] == 'api-test-memory'
+
     deleted = client.request('DELETE', '/v1/memory/api-test-memory', json={
         'project_id': 'api-project', 'namespace': 'project'
     })
@@ -35,3 +38,14 @@ def test_memory_scope_isolation():
     })
     assert found.status_code == 200
     assert found.json() == []
+
+
+def test_memory_delete_requires_matching_scope():
+    client.post('/v1/memory', json={
+        'memory_id': 'delete-scope-memory', 'content': 'protected',
+        'project_id': 'owner', 'namespace': 'project'
+    })
+    denied = client.request('DELETE', '/v1/memory/delete-scope-memory', json={
+        'project_id': 'other', 'namespace': 'project'
+    })
+    assert denied.status_code == 404
