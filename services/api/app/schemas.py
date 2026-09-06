@@ -13,12 +13,14 @@ class TaskCreate(BaseModel):
     goal: str = Field(min_length=1, max_length=10000)
     project_id: str | None = None
     priority: int = Field(default=5, ge=1, le=10)
+    owner_id: str = Field(default='local-dev', min_length=1, max_length=200)
 
 class Task(BaseModel):
     task_id: UUID = Field(default_factory=uuid4)
     goal: str
     project_id: str | None = None
     priority: int = 5
+    owner_id: str = 'local-dev'
     status: TaskStatus = TaskStatus.QUEUED
     result: Any | None = None
     error: str | None = None
