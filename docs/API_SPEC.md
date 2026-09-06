@@ -9,83 +9,49 @@ AETHON-0 exposes a small versioned HTTP API. The API is an authentication and au
 - Base path: `/v1`
 - JSON request/response bodies
 - ISO-8601 UTC timestamps
-- Every response should include `request_id`
-- Authentication and project authorization are required for non-health endpoints
+- Every response should include `request_id` as the API matures
+- Health endpoints are public; protected resources use bearer authentication when configured
 - Errors use a stable shape
 
-## Error Contract
+## Authentication
 
-```json
-{
-  "error": {
-    "code": "TASK_NOT_FOUND",
-    "message": "Task was not found",
-    "details": {}
-  },
-  "request_id": "..."
-}
-```
+Configure `AETHON_API_TOKEN` and `AETHON_API_OWNER_ID` in production. Protected task and memory endpoints then require `Authorization: Bearer <token>`. The server derives the owner identity from the authenticated configuration; clients cannot select another owner by putting an arbitrary owner ID in the JSON body.
+
+The current adapter is intentionally single-owner per configured token. A future OAuth/OIDC identity provider can replace it while retaining the `owner_id` ownership boundary.
 
 ## Endpoints
 
 ### `GET /health`
 
-Liveness check. Must not require authentication.
+Liveness check. Does not require authentication.
 
 ### `GET /ready`
 
-Readiness check. Reports whether required application dependencies are available.
+Readiness check. Reports the configured persistence mode.
 
 ### `POST /v1/tasks`
 
-Create a task.
-
-Request:
-
-```json
-{
-  "goal": "string",
-  "project_id": "string",
-  "constraints": [],
-  "requested_capabilities": [],
-  "priority": "normal"
-}
-```
-
-Response: `201` with the canonical task representation.
+Create a task. The server assigns the authenticated owner identity.
 
 ### `GET /v1/tasks/{task_id}`
 
-Returns task state, current plan summary, result/error, and timestamps. The caller must have access to the task's project.
+Returns task state only when the authenticated owner matches the task owner.
 
 ### `POST /v1/tasks/{task_id}/cancel`
 
-Requests cancellation. Cancellation is idempotent.
-
-### `POST /v1/tasks/{task_id}/approval`
-
-Approve or deny a pending action.
-
-```json
-{
-  "decision": "approve",
-  "scope": "single_action"
-}
-```
-
-The server must verify that the caller is authorized to approve the specific action.
+Requests cancellation after owner authorization.
 
 ### `GET /v1/tasks/{task_id}/events`
 
-Returns task lifecycle and audit-safe execution events in chronological order.
+Returns lifecycle and audit-safe events after owner authorization.
 
 ### `GET /v1/tools`
 
-Returns tools visible to the authenticated project/user, including permission and risk metadata. Secrets and credentials are never returned.
+Returns visible tool metadata without credentials.
 
 ### `POST /v1/memory`
 
-Creates or replaces a memory record inside the explicitly supplied project/namespace scope. Content is validated and secrets are redacted before storage.
+Creates or replaces a memory inside the authenticated owner's project/namespace scope. Secrets are redacted before persistence.
 
 ```json
 {
@@ -102,44 +68,28 @@ Creates or replaces a memory record inside the explicitly supplied project/names
 
 ### `POST /v1/memory/search`
 
-Searches only within the requested project and namespace. Results include provenance, confidence, and retention metadata.
-
-```json
-{
-  "query": "string",
-  "project_id": "string",
-  "namespace": "project",
-  "limit": 10
-}
-```
+Searches only within the authenticated owner, project, and namespace. Results include provenance, confidence, and retention metadata.
 
 ### `DELETE /v1/memory/{memory_id}`
 
-Deletes a memory only when the supplied project and namespace match the stored record. A mismatched scope is treated as not found.
+Deletes only when owner, project, and namespace match. A mismatched scope is treated as not found.
 
-```json
-{
-  "project_id": "string",
-  "namespace": "project"
-}
-```
+## Durable Persistence
+
+When `AETHON_DATABASE_URL` is configured with PostgreSQL, memory is stored in the PostgreSQL `memories` table rather than the process-local engine. Apply `services/api/migrations/002_memory_ownership.sql` to upgrade existing databases before deployment. This prevents memory from disappearing when API workers restart.
 
 ## Agent Memory Integration
 
-Before model reasoning, the task runtime retrieves at most five relevant records from the task's project namespace. Retrieved memory is explicitly passed as context, never as authority or executable instructions. After successful verification, the task result may be stored as episodic memory through the same redaction and scope controls.
-
-## Idempotency
-
-Task creation and side-effecting API operations should support an idempotency key. The server must not replay a non-idempotent operation solely because a client retried a request.
+Before model reasoning, the runtime retrieves at most five relevant records from the task owner's project namespace. Retrieved memory is context only—not authority, permission, or executable instruction. After successful verification, the verified task result may be stored as episodic memory through the same owner, project, namespace, and secret-redaction controls.
 
 ## Security Requirements
 
 - Authenticate before protected resource access.
 - Authorize every task/project/resource access.
+- Never accept a client-supplied owner identity as an authorization decision.
 - Validate and bound request sizes.
 - Rate-limit expensive operations.
-- Never accept a client-supplied permission escalation.
 - Never expose model/provider credentials.
-- Record security-relevant decisions.
 - Treat memory as context, not authority.
-- Enforce project and namespace isolation on every memory operation.
+- Enforce owner, project, and namespace isolation on every memory operation.
+- Audit security-relevant decisions.
