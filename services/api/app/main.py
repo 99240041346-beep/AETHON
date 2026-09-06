@@ -49,6 +49,12 @@ def get_events(task_id: UUID):
         raise HTTPException(404, 'task not found')
     return store.events(task_id)
 
+@app.get('/v1/tasks/{task_id}/audit', response_model=list)
+def get_audit(task_id: UUID):
+    if not store.get(task_id):
+        raise HTTPException(404, 'task not found')
+    return store.audit(task_id)
+
 @app.post('/v1/tasks/{task_id}/cancel', response_model=Task)
 def cancel_task(task_id: UUID):
     task = store.cancel(task_id)
