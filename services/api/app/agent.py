@@ -40,8 +40,6 @@ class AgentRuntime:
             plan = self._plan_from_state(saved.plan)
             observations = list(saved.observations)
             self._event(task, "agent.state_restored", {"revision": plan.revision, "last_verified_step": saved.last_verified_step, "completed_steps": list(plan.completed_steps)})
-            # A checkpoint never certifies an in-flight step. Only SUCCEEDED steps
-            # are trusted; PENDING/FAILED steps are re-evaluated by AgentBrain.
             for step in plan.steps:
                 if step.status not in {"SUCCEEDED", "PENDING"}:
                     step.status = "PENDING"
@@ -55,7 +53,7 @@ class AgentRuntime:
             self._checkpoint(task, plan, observations, "RUNNING")
             self._transition(task, TaskStatus.EXECUTING)
 
-        if task.status in {TaskStatus.CREATED, TaskStatus.PAUSED, TaskStatus.RECOVERING}:
+        if task.status == TaskStatus.QUEUED:
             self._transition(task, TaskStatus.EXECUTING)
 
         for _ in range(self.brain.max_steps + self.brain.max_replans + 2):
@@ -67,8 +65,7 @@ class AgentRuntime:
             decision = self.brain.next_decision(plan)
             self._event(task, "brain.decision", {"action": decision.action, "reason": decision.reason, "step_id": decision.step.step_id if decision.step else None, "revision": plan.revision})
             self._checkpoint(task, plan, observations, "RUNNING")
-            if decision.action == "FINISH":
-                break
+            if decision.action == "FINISH": break
             if decision.action == "BLOCK":
                 task.status = TaskStatus.BLOCKED
                 task.error = decision.reason
