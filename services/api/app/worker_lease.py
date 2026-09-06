@@ -43,10 +43,12 @@ class WorkerLeaseStore:
         now = self._now()
         with self._lock:
             row = self._conn.execute(
-                "SELECT expires_at FROM worker_leases WHERE task_id=?", (task_id,)
+                "SELECT worker_id, expires_at FROM worker_leases WHERE task_id=?", (task_id,)
             ).fetchone()
-            if row and row[0] > now:
-                raise LeaseConflict("task is already leased")
+            if row and row[1] > now:
+                if row[0] == worker_id:
+                    raise LeaseConflict("task is already leased by this worker")
+                raise LeaseConflict("another worker already holds the task lease")
             self._conn.execute(
                 "INSERT INTO worker_leases(task_id,worker_id,lease_token,acquired_at,heartbeat_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET worker_id=excluded.worker_id, lease_token=excluded.lease_token, acquired_at=excluded.acquired_at, heartbeat_at=excluded.heartbeat_at, expires_at=excluded.expires_at",
                 (task_id, worker_id, token, self._iso(), self._iso(), now + ttl_seconds),
