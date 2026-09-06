@@ -10,7 +10,7 @@ from aethon.store import TaskStore
 from aethon.tools import ToolRegistry
 from aethon.security import SafetyKernel
 from aethon.model_router import ModelRouter
-from aethon.memory_api import MemoryWriteRequest, MemorySearchRequest, MemoryDeleteRequest, write_memory, search_memory, delete_memory
+from aethon.memory_api import MemoryWriteRequest, MemorySearchRequest, MemoryDeleteRequest, MemoryMaintenanceRequest, write_memory, search_memory, delete_memory, plan_memory_maintenance
 from aethon.memory_engine import MemorySecurityError
 
 app = FastAPI(title='AETHON API', version='0.1.0')
@@ -60,6 +60,13 @@ def create_memory(request: MemoryWriteRequest, owner_id: str = Depends(owner)):
 def search_memories(request: MemorySearchRequest, owner_id: str = Depends(owner)):
     try:
         return search_memory(request, owner_id=owner_id)
+    except MemorySecurityError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@app.post('/v1/memory/maintenance')
+def memory_maintenance(request: MemoryMaintenanceRequest, owner_id: str = Depends(owner)):
+    try:
+        return plan_memory_maintenance(request, owner_id=owner_id)
     except MemorySecurityError as exc:
         raise HTTPException(400, str(exc)) from exc
 
