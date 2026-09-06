@@ -99,6 +99,17 @@ def get_events(task_id: UUID, owner_id: str = Depends(owner)):
         raise HTTPException(404, 'task not found')
     return store.events(task_id)
 
+@app.get('/v1/tasks/{task_id}/plan', response_model=dict)
+def get_plan(task_id: UUID, owner_id: str = Depends(owner)):
+    """Return the latest Agent Brain plan snapshot for an authorized task."""
+    task = store.get(task_id)
+    if not task or task.owner_id != owner_id:
+        raise HTTPException(404, 'task not found')
+    snapshots = [event.data for event in store.events(task_id) if event.type in {'plan.created', 'plan.replanned'}]
+    if not snapshots:
+        raise HTTPException(404, 'plan not found')
+    return snapshots[-1]
+
 @app.get('/v1/tasks/{task_id}/audit', response_model=list)
 def get_audit(task_id: UUID, owner_id: str = Depends(owner)):
     task = store.get(task_id)
