@@ -54,6 +54,14 @@ class AgentRuntime:
             self._transition(task, TaskStatus.EXECUTING)
 
         for _ in range(self.brain.max_steps + self.brain.max_replans + 2):
+            if self.state_store.cancel_requested(task.task_id):
+                task.status = TaskStatus.CANCELLED
+                task.error = None
+                self._checkpoint(task, plan, observations, "CANCELLED", last_verified_step=self._last_verified(plan))
+                self._event(task, "task.cancelled", {"last_verified_step": self._last_verified(plan), "revision": plan.revision})
+                self._audit(task, "task_cancelled", {"last_verified_step": self._last_verified(plan), "revision": plan.revision})
+                self.state_store.clear_controls(task.task_id)
+                return task
             if self.state_store.pause_requested(task.task_id):
                 task.status = TaskStatus.PAUSED
                 task.error = None
@@ -64,6 +72,7 @@ class AgentRuntime:
             if task.status == TaskStatus.CANCELLED:
                 self._checkpoint(task, plan, observations, "CANCELLED")
                 self._event(task, "task.cancelled", {})
+                self.state_store.clear_controls(task.task_id)
                 return task
 
             decision = self.brain.next_decision(plan)
@@ -75,13 +84,14 @@ class AgentRuntime:
                 task.error = decision.reason
                 self._checkpoint(task, plan, observations, "BLOCKED")
                 self._event(task, "task.blocked", {"reason": decision.reason})
-                self._audit(task, "task_blocked", {"reason": decision.reason})
+                self.state_store.clear_controls(task.task_id)
                 return task
             if decision.action == "WAIT" or decision.step is None:
                 task.status = TaskStatus.FAILED
                 task.error = "plan dependencies could not be satisfied"
                 self._checkpoint(task, plan, observations, "FAILED")
                 self._event(task, "task.failed", {"reason": task.error})
+                self.state_store.clear_controls(task.task_id)
                 return task
 
             step = decision.step
@@ -110,12 +120,14 @@ class AgentRuntime:
                             self._checkpoint(task, plan, observations, "BLOCKED")
                             self._event(task, "task.blocked", {"reason": task.error})
                             self._audit(task, "task_blocked", {"reason": task.error})
+                            self.state_store.clear_controls(task.task_id)
                             return task
                         if replanned.action == "FAIL":
                             task.status = TaskStatus.FAILED
                             task.error = f"verification failed: {verification.reason}"
                             self._checkpoint(task, plan, observations, "FAILED")
                             self._audit(task, "task_failed", {"reason": task.error})
+                            self.state_store.clear_controls(task.task_id)
                             return task
                         self._checkpoint(task, plan, observations, "RECOVERING")
                         self._transition(task, TaskStatus.EXECUTING)
@@ -134,12 +146,14 @@ class AgentRuntime:
                     self._checkpoint(task, plan, observations, "BLOCKED")
                     self._event(task, "task.blocked", {"reason": task.error})
                     self._audit(task, "task_blocked", {"reason": task.error})
+                    self.state_store.clear_controls(task.task_id)
                     return task
                 if replanned.action == "FAIL":
                     task.status = TaskStatus.FAILED
                     task.error = str(exc)
                     self._checkpoint(task, plan, observations, "FAILED")
                     self._audit(task, "task_failed", {"reason": task.error})
+                    self.state_store.clear_controls(task.task_id)
                     return task
                 self._checkpoint(task, plan, observations, "RECOVERING")
                 self._transition(task, TaskStatus.EXECUTING)
@@ -150,6 +164,7 @@ class AgentRuntime:
             task.error = "execution budget exhausted"
             self._checkpoint(task, plan, observations, "BLOCKED")
             self._event(task, "task.blocked", {"reason": task.error, "revision": plan.revision})
+            self.state_store.clear_controls(task.task_id)
             return task
 
         task.result = answer
@@ -158,6 +173,7 @@ class AgentRuntime:
         self._transition(task, TaskStatus.SUCCEEDED)
         self._checkpoint(task, plan, observations, "SUCCEEDED", last_verified_step=self._last_verified(plan))
         self._audit(task, "task_succeeded", {"verified": True, "plan_revision": plan.revision, "completed_steps": list(plan.completed_steps)})
+        self.state_store.clear_controls(task.task_id)
         return task
 
     def _replan(self, task, plan: Plan, step, reason: str, observations: list[object]) -> BrainDecision:
