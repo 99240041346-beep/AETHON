@@ -55,11 +55,35 @@ retrieve(query, scope, filters, limit)
 update(memory_id, patch)
 delete(memory_id)
 forget(query, scope)
+consolidate(scope)
+analyze_conflicts(scope)
 ```
 
-## Retrieval
+## Intelligent Retrieval
 
-AETHON retrieves a small bounded set of relevant memories before model reasoning. Retrieved memory is explicitly context only; it never grants permission, changes authentication, or overrides current user constraints and safety policy.
+Retrieval uses a bounded hybrid score:
+
+```text
+score = 0.65 × lexical relevance
+      + 0.15 × recency
+      + 0.20 × confidence
+```
+
+Lexical relevance is deterministic and provider-independent. Recency uses a 30-day exponential decay. Confidence is supplied by the memory source and is never treated as proof of truth.
+
+PostgreSQL retrieval first selects a bounded candidate set, then applies the same ranking model. This keeps the runtime behavior aligned between local development and production persistence.
+
+Semantic/vector retrieval is an extension point for a future pgvector-backed embedding index. Embedding retrieval must remain scoped by owner, project, and namespace before similarity ranking is applied.
+
+## Consolidation and Conflicts
+
+Consolidation currently operates as a **review-only** operation: it reports duplicate content groups and explicit keyed conflicts without silently deleting or overwriting records. Automatic consolidation requires a higher-level policy and audit trail.
+
+Explicit conflict keys use conservative `key: value` or `key=value` patterns. Conflicts are treated as uncertainty signals and must not be presented as established facts without resolution.
+
+## Agent Integration
+
+Before model reasoning, the runtime retrieves at most five relevant records from the task's authorized scope. The selected memory is injected as context only and is never executable authority. After successful verification, the task result may be persisted as episodic memory through the same ownership and redaction controls.
 
 ## Retention
 
