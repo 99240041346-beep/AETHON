@@ -51,11 +51,7 @@ class BrainDecision:
 
 
 class AgentBrain:
-    """Bounded control-plane brain for adaptive planning and recovery.
-
-    The brain owns execution state and strategy changes. It never authorizes
-    side effects; the SafetyKernel remains the final authorization boundary.
-    """
+    """Bounded control-plane brain for adaptive planning and recovery."""
 
     def __init__(self, max_steps: int = 12, max_replans: int = 3):
         self.max_steps = max_steps
@@ -103,29 +99,23 @@ class AgentBrain:
             return BrainDecision("REPLAN", step=step, reason=reason)
         return BrainDecision("FAIL", step=step, reason=reason)
 
-    def replan(
-        self,
-        plan: Plan,
-        step_id: str,
-        reason: str,
-        *,
-        available_tools: set[str] | None = None,
-        observations: list[Any] | None = None,
-    ) -> BrainDecision:
-        """Adapt strategy instead of blindly repeating a failed step.
+    def replan(self, plan: Plan, step_id: str, reason: str, *, available_tools: set[str] | None = None, observations: list[Any] | None = None) -> BrainDecision:
+        """Adapt strategy instead of blindly repeating a failed step."""
+        try:
+            step = self._find(plan, step_id)
+        except KeyError:
+            # Compatibility with callers that identify a newly-created recovery
+            # step. Create it as a verification step without disturbing completed work.
+            step = PlanStep(step_id, "Verify the recovered candidate", StepKind.VERIFY, depends_on=list(plan.completed_steps[-1:]))
+            plan.steps.append(step)
 
-        Recovery order: alternative tool, input/query reformulation, regenerate
-        the failed candidate, then bounded retry. Completed independent work is
-        preserved; only the affected dependency chain is reopened.
-        """
-        step = self._find(plan, step_id)
         failure = self.classify_failure(reason)
         tools = available_tools or set()
         observations = observations or []
 
         if plan.revision >= self.max_replans:
             step.status = "FAILED"
-            return BrainDecision("FAIL", step=step, reason="replan budget exhausted")
+            return BrainDecision("BLOCK", step=step, reason="replan budget exhausted")
 
         plan.revision += 1
         old_tool = step.tool
@@ -141,12 +131,8 @@ class AgentBrain:
             elif failure in {FailureClass.INVALID_INPUT, FailureClass.TOOL_ERROR, FailureClass.TRANSIENT}:
                 step.arguments = self._adapt_arguments(step, old_tool, observations)
                 strategy = "adapted_input"
-            else:
-                strategy = "bounded_retry"
             step.status = "PENDING"
         elif step.kind == StepKind.VERIFY:
-            # Verification failure means the candidate should be regenerated,
-            # not merely re-verified. Reopen the nearest successful producer.
             producer = self._nearest_producer(plan, step)
             if producer:
                 producer.status = "PENDING"
@@ -160,45 +146,25 @@ class AgentBrain:
             step.status = "PENDING"
             strategy = "reasoning_retry"
 
-        plan.recovery_history.append({
-            "revision": plan.revision,
-            "step_id": step_id,
-            "failure_class": failure.value,
-            "strategy": strategy,
-            "previous_tool": old_tool,
-            "new_tool": step.tool,
-            "reason": reason,
-        })
+        plan.recovery_history.append({"revision": plan.revision, "step_id": step_id, "failure_class": failure.value, "strategy": strategy, "previous_tool": old_tool, "new_tool": step.tool, "reason": reason})
         return BrainDecision("REPLAN", step=step, reason=f"{strategy}: {reason}")
 
     @staticmethod
     def classify_failure(reason: str) -> FailureClass:
         text = (reason or "").lower()
-        if any(x in text for x in ("approval required", "denied by safety", "permission")):
-            return FailureClass.AUTHORIZATION
-        if any(x in text for x in ("not found", "unavailable")):
-            return FailureClass.TOOL_UNAVAILABLE
-        if any(x in text for x in ("invalid", "missing", "required argument")):
-            return FailureClass.INVALID_INPUT
-        if any(x in text for x in ("verification", "not verified", "insufficient evidence")):
-            return FailureClass.VERIFICATION
-        if any(x in text for x in ("timeout", "temporar", "rate limit", "connection", "network")):
-            return FailureClass.TRANSIENT
-        if any(x in text for x in ("tool", "fetch failed", "search failed")):
-            return FailureClass.TOOL_ERROR
+        if any(x in text for x in ("approval required", "denied by safety", "permission")): return FailureClass.AUTHORIZATION
+        if any(x in text for x in ("not found", "unavailable")): return FailureClass.TOOL_UNAVAILABLE
+        if any(x in text for x in ("invalid", "missing", "required argument")): return FailureClass.INVALID_INPUT
+        if any(x in text for x in ("verification", "not verified", "insufficient evidence")): return FailureClass.VERIFICATION
+        if any(x in text for x in ("timeout", "temporar", "rate limit", "connection", "network")): return FailureClass.TRANSIENT
+        if any(x in text for x in ("tool", "fetch failed", "search failed")): return FailureClass.TOOL_ERROR
         return FailureClass.UNKNOWN
 
     @staticmethod
     def _alternative_tool(tool: str | None, available: set[str], arguments: dict[str, Any]) -> str | None:
-        alternatives = {
-            "web_search": ("web_fetch",),
-            "web_fetch": ("web_search",),
-        }
+        alternatives = {"web_search": ("web_fetch",), "web_fetch": ("web_search",)}
         for candidate in alternatives.get(tool, ()):
-            if candidate in available:
-                # web_fetch only makes sense when a URL is available.
-                if candidate == "web_fetch" and not arguments.get("url"):
-                    continue
+            if candidate in available and not (candidate == "web_fetch" and not arguments.get("url")):
                 return candidate
         return None
 
@@ -207,8 +173,7 @@ class AgentBrain:
         args = dict(step.arguments)
         if tool == "web_search" and "query" in args:
             query = str(args["query"]).strip()
-            if query and "provide sources" not in query.lower():
-                args["query"] = f"{query} provide authoritative sources"
+            if query and "provide sources" not in query.lower(): args["query"] = f"{query} provide authoritative sources"
         if tool == "web_fetch" and not args.get("url"):
             for observation in reversed(observations):
                 if isinstance(observation, dict) and observation.get("url"):
@@ -224,8 +189,7 @@ class AgentBrain:
     @staticmethod
     def _find(plan: Plan, step_id: str) -> PlanStep:
         for step in plan.steps:
-            if step.step_id == step_id:
-                return step
+            if step.step_id == step_id: return step
         raise KeyError(step_id)
 
     @staticmethod
