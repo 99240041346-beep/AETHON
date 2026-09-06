@@ -1,6 +1,6 @@
 from aethon.agent import AgentRuntime
 from aethon.agent_brain import AgentBrain
-from aethon.schemas import Task, TaskStatus
+from aethon.schemas import Task, TaskStatus, ToolResult, ToolSpec, RiskClass, ToolRequest
 from aethon.verification import VerificationResult
 
 
@@ -34,8 +34,17 @@ class FailingOnceVerifier:
         return VerificationResult(True, 'passed after replan', {})
 
 
+class FakeTools:
+    def list(self):
+        return [ToolSpec(name='web_search', description='fake search', risk=RiskClass.LOW)]
+
+    def execute(self, request: ToolRequest):
+        assert request.tool == 'web_search'
+        return ToolResult(ok=True, output=[{'title': 'AETHON', 'url': 'https://example.com', 'snippet': 'test', 'source': 'test'}])
+
+
 def test_runtime_emits_plan_and_tool_observation_events():
-    runtime = AgentRuntime(verifier=PassingVerifier())
+    runtime = AgentRuntime(verifier=PassingVerifier(), tools=FakeTools())
     model = Model()
     runtime.models = model
     task = runtime.run(Task(goal='search for the latest AETHON architecture'))
