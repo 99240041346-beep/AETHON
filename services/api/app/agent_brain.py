@@ -104,8 +104,6 @@ class AgentBrain:
         try:
             step = self._find(plan, step_id)
         except KeyError:
-            # Compatibility with callers that identify a newly-created recovery
-            # step. Create it as a verification step without disturbing completed work.
             step = PlanStep(step_id, "Verify the recovered candidate", StepKind.VERIFY, depends_on=list(plan.completed_steps[-1:]))
             plan.steps.append(step)
 
