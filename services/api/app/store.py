@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import UUID
 
 from aethon.agent import AgentRuntime
-from aethon.schemas import Event, Task, TaskCreate
+from aethon.schemas import Event, Task, TaskCreate, TaskStatus
 
 
 class TaskStore:
@@ -48,6 +48,14 @@ class TaskStore:
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, created_at);
+            CREATE TABLE IF NOT EXISTS audit_log (
+                audit_id TEXT PRIMARY KEY,
+                task_id TEXT,
+                action TEXT NOT NULL,
+                data_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_task ON audit_log(task_id, created_at);
             """)
 
     @staticmethod
@@ -75,6 +83,11 @@ class TaskStore:
                     "INSERT OR IGNORE INTO events(event_id,task_id,type,data_json,created_at) VALUES(?,?,?,?,?)",
                     (str(event.event_id), str(event.task_id), event.type, json.dumps(event.data), self._now()),
                 )
+                if event.type.startswith("audit."):
+                    conn.execute(
+                        "INSERT OR IGNORE INTO audit_log(audit_id,task_id,action,data_json,created_at) VALUES(?,?,?,?,?)",
+                        (str(event.event_id), str(event.task_id), event.type[6:], json.dumps(event.data), self._now()),
+                    )
 
     def create(self, request: TaskCreate) -> Task:
         task = Task(goal=request.goal, project_id=request.project_id, priority=request.priority)
@@ -99,11 +112,22 @@ class TaskStore:
             rows = conn.execute("SELECT * FROM events WHERE task_id=? ORDER BY created_at", (str(task_id),)).fetchall()
         return [Event(event_id=UUID(r["event_id"]), task_id=UUID(r["task_id"]), type=r["type"], data=json.loads(r["data_json"])) for r in rows]
 
+    def audit(self, task_id: UUID | None = None) -> list[dict]:
+        query = "SELECT * FROM audit_log"
+        args = ()
+        if task_id is not None:
+            query += " WHERE task_id=?"
+            args = (str(task_id),)
+        query += " ORDER BY created_at"
+        with self._connect() as conn:
+            rows = conn.execute(query, args).fetchall()
+        return [{"audit_id": r["audit_id"], "task_id": r["task_id"], "action": r["action"],
+                 "data": json.loads(r["data_json"]), "created_at": r["created_at"]} for r in rows]
+
     def cancel(self, task_id: UUID) -> Task | None:
         task = self.get(task_id)
         if task is None:
             return None
-        from aethon.schemas import TaskStatus
         if task.status not in {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED}:
             task.status = TaskStatus.CANCELLED
             self._persist_task(task)
