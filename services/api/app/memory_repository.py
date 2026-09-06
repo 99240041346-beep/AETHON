@@ -106,6 +106,25 @@ class MemoryRepository:
                 raise MemorySecurityError("memory id belongs to another authorized scope")
             return self._row_to_record(row)
 
+    def list_scope(self, *, owner_id: str = "local-dev", project_id: str | None = None,
+                   namespace: str = "default", limit: int = 500) -> list[MemoryRecord]:
+        if not owner_id.strip():
+            raise MemorySecurityError("owner_id is required")
+        namespace = validate_namespace(namespace)
+        limit = max(1, min(limit, 1000))
+        if not self.use_postgres:
+            return [r for r in self.fallback._records.values()
+                    if r.owner_id == owner_id and r.project_id == project_id and r.namespace == namespace][:limit]
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """SELECT memory_id, content, namespace, project_id, memory_type, source,
+                   confidence, created_at, updated_at, expires_at, owner_id
+                   FROM memories WHERE owner_id=%s AND project_id IS NOT DISTINCT FROM %s
+                   AND namespace=%s ORDER BY updated_at DESC LIMIT %s""",
+                (owner_id, project_id, namespace, limit),
+            )
+            return [self._row_to_record(row) for row in cur.fetchall()]
+
     def search(self, query: str, *, owner_id: str = "local-dev", project_id: str | None = None,
                namespace: str = "default", limit: int = 10) -> list[MemoryRecord]:
         if not owner_id.strip():
