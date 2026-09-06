@@ -4,11 +4,13 @@ from aethon.schemas import TaskCreate, Task, ToolRequest
 from aethon.store import TaskStore
 from aethon.tools import ToolRegistry
 from aethon.security import SafetyKernel
+from aethon.model_router import ModelRouter
 
 app = FastAPI(title='AETHON API', version='0.1.0')
 store = TaskStore()
 tools = ToolRegistry()
 safety = SafetyKernel()
+model_router = ModelRouter()
 
 @app.get('/health')
 def health():
@@ -17,6 +19,10 @@ def health():
 @app.get('/ready')
 def ready():
     return {'ok': True, 'persistence': 'sqlite'}
+
+@app.get('/v1/model/health')
+def model_health():
+    return {'ok': model_router.health(), 'provider': model_router.provider.name}
 
 @app.get('/v1/tools')
 def list_tools():
