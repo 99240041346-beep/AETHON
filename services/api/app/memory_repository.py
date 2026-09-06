@@ -4,7 +4,7 @@ import json
 import os
 from typing import Any
 
-from aethon.memory_engine import MemoryRecord, PersistentMemoryEngine, validate_namespace, redact_secrets, MemorySecurityError, MemoryMatch, _terms, _recency_score
+from aethon.memory_engine import MemoryMatch, MemoryRecord, MemorySecurityError, PersistentMemoryEngine, _recency_score, _terms, redact_secrets, validate_namespace
 
 
 class MemoryRepository:
@@ -26,12 +26,14 @@ class MemoryRepository:
 
     @staticmethod
     def _row_to_record(row: tuple[Any, ...]) -> MemoryRecord:
-        return MemoryRecord(memory_id=str(row[0]), content=row[1], namespace=row[2], project_id=row[3],
+        return MemoryRecord(
+            memory_id=str(row[0]), content=row[1], namespace=row[2], project_id=row[3],
             memory_type=row[4], source=row[5], confidence=float(row[6]),
             created_at=row[7].isoformat() if hasattr(row[7], "isoformat") else str(row[7]),
             updated_at=row[8].isoformat() if hasattr(row[8], "isoformat") else str(row[8]),
             expires_at=row[9].isoformat() if row[9] is not None and hasattr(row[9], "isoformat") else row[9],
-            owner_id=str(row[10]) if len(row) > 10 else "local-dev")
+            owner_id=str(row[10]) if len(row) > 10 else "local-dev",
+        )
 
     def put(self, memory_id: str, content: str, *, owner_id: str = "local-dev", project_id: str | None = None,
             namespace: str = "default", memory_type: str = "semantic", source: str = "agent",
@@ -46,23 +48,33 @@ class MemoryRepository:
         safe_content = redact_secrets(content.strip())
         if not self.use_postgres:
             return self.fallback.put(memory_id, safe_content, owner_id=owner_id, project_id=project_id,
-                namespace=namespace, memory_type=memory_type, source=source, confidence=confidence,
-                expires_at=expires_at)
+                                     namespace=namespace, memory_type=memory_type, source=source,
+                                     confidence=confidence, expires_at=expires_at)
+
+        # Ownership is part of the conflict predicate. A caller from another
+        # scope must never be able to overwrite an existing memory_id.
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO memories(memory_id, owner_id, project_id, namespace, content, metadata,
                    confidence, source, memory_type, expires_at, updated_at)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
-                   ON CONFLICT (memory_id) DO UPDATE SET owner_id=EXCLUDED.owner_id,
-                   project_id=EXCLUDED.project_id, namespace=EXCLUDED.namespace, content=EXCLUDED.content,
-                   metadata=EXCLUDED.metadata, confidence=EXCLUDED.confidence, source=EXCLUDED.source,
-                   memory_type=EXCLUDED.memory_type, expires_at=EXCLUDED.expires_at, updated_at=NOW()
+                   ON CONFLICT (memory_id) DO UPDATE SET
+                     content=EXCLUDED.content, metadata=EXCLUDED.metadata,
+                     confidence=EXCLUDED.confidence, source=EXCLUDED.source,
+                     memory_type=EXCLUDED.memory_type, expires_at=EXCLUDED.expires_at,
+                     updated_at=NOW()
+                   WHERE memories.owner_id = EXCLUDED.owner_id
+                     AND memories.project_id IS NOT DISTINCT FROM EXCLUDED.project_id
+                     AND memories.namespace = EXCLUDED.namespace
                    RETURNING memory_id, content, namespace, project_id, memory_type, source,
-                   confidence, created_at, updated_at, expires_at, owner_id""",
-                (memory_id, owner_id, project_id, namespace, safe_content, json.dumps({"owner_id": owner_id}),
-                 confidence, source, memory_type, expires_at),
+                     confidence, created_at, updated_at, expires_at, owner_id""",
+                (memory_id, owner_id, project_id, namespace, safe_content,
+                 json.dumps({"owner_id": owner_id}), confidence, source, memory_type, expires_at),
             )
-            return self._row_to_record(cur.fetchone())
+            row = cur.fetchone()
+            if row is None:
+                raise MemorySecurityError("memory id belongs to another authorized scope")
+            return self._row_to_record(row)
 
     def search(self, query: str, *, owner_id: str = "local-dev", project_id: str | None = None,
                namespace: str = "default", limit: int = 10) -> list[MemoryRecord]:
@@ -71,7 +83,8 @@ class MemoryRepository:
         namespace = validate_namespace(namespace)
         limit = max(1, min(limit, 100))
         if not self.use_postgres:
-            return self.fallback.search(query, owner_id=owner_id, project_id=project_id, namespace=namespace, limit=limit)
+            return self.fallback.search(query, owner_id=owner_id, project_id=project_id,
+                                        namespace=namespace, limit=limit)
         terms = _terms(query)
         if not terms:
             return []
@@ -105,6 +118,9 @@ class MemoryRepository:
         if not self.use_postgres:
             return self.fallback.delete(memory_id, owner_id=owner_id, project_id=project_id, namespace=namespace)
         with self._connect() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM memories WHERE memory_id=%s AND owner_id=%s AND project_id IS NOT DISTINCT FROM %s AND namespace=%s",
-                (memory_id, owner_id, project_id, namespace))
+            cur.execute(
+                "DELETE FROM memories WHERE memory_id=%s AND owner_id=%s "
+                "AND project_id IS NOT DISTINCT FROM %s AND namespace=%s",
+                (memory_id, owner_id, project_id, namespace),
+            )
             return cur.rowcount == 1
