@@ -28,6 +28,7 @@ class TaskStore:
         self._futures: dict[UUID, Future] = {}
         self._future_lock = threading.Lock()
         self._init_db()
+        self._recover_queued_tasks()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.database_path)
@@ -92,6 +93,39 @@ class TaskStore:
     def _forget_future(self, task_id: UUID) -> None:
         with self._future_lock:
             self._futures.pop(task_id, None)
+
+    def _recover_queued_tasks(self) -> None:
+        """Re-admit durable QUEUED tasks after an API-process restart."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT task_id, goal, project_id, priority, owner_id FROM tasks WHERE status=? ORDER BY created_at",
+                (TaskStatus.QUEUED.value,),
+            ).fetchall()
+        for row in rows:
+            task = Task(task_id=UUID(row["task_id"]), goal=row["goal"], project_id=row["project_id"],
+                        priority=row["priority"], owner_id=row["owner_id"], status=TaskStatus.QUEUED)
+            try:
+                future = self._submit(task)
+            except RuntimeError:
+                break
+            self.runtime._event(task, "task.recovered", {"scheduler": "bounded-thread-pool", "priority": task.priority})
+            self._persist_events(task.task_id)
+            future.add_done_callback(lambda completed, task_id=task.task_id: self._persist_recovered_result(task_id, completed))
+
+    def _persist_recovered_result(self, task_id: UUID, future: Future) -> None:
+        self._forget_future(task_id)
+        try:
+            result = future.result()
+        except Exception as exc:
+            task = self.get(task_id)
+            if task is None or task.status in {TaskStatus.CANCELLED, TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.BLOCKED}:
+                return
+            task.status = TaskStatus.FAILED
+            task.error = str(exc)
+        else:
+            task = result
+        self._persist_task(task)
+        self._persist_events(task_id)
 
     def create(self, request: TaskCreate) -> Task:
         task = Task(goal=request.goal, project_id=request.project_id, priority=request.priority, owner_id=request.owner_id)
