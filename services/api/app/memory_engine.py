@@ -3,9 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from math import log1p
 from threading import RLock
-from typing import Any
 
 _SECRET_PATTERNS = (
     re.compile(r"(?i)\b(api[_ -]?key|secret|password|token|private[_ -]?key)\b\s*[:=]\s*\S+"),
@@ -46,11 +44,7 @@ def validate_namespace(namespace: str) -> str:
 
 
 class PersistentMemoryEngine:
-    """Thread-safe persistent-process memory with namespace isolation.
-
-    This is the runtime foundation; PostgreSQL/pgvector can implement the same
-    interface without changing callers.
-    """
+    """Thread-safe memory runtime with project/namespace isolation."""
 
     def __init__(self):
         self._records: dict[str, MemoryRecord] = {}
@@ -138,3 +132,8 @@ class PersistentMemoryEngine:
         namespace = validate_namespace(namespace)
         with self._lock:
             return sum(1 for r in self._records.values() if r.project_id == project_id and r.namespace == namespace)
+
+
+# API and task execution share this runtime boundary. Callers/tests can still
+# inject an isolated PersistentMemoryEngine into AgentRuntime when needed.
+default_memory_engine = PersistentMemoryEngine()
