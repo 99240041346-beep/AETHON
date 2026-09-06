@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
+import re
 
 
 @dataclass(frozen=True)
@@ -33,9 +34,10 @@ class SynthesisResult:
 class EvidenceSynthesizer:
     """Deterministic evidence gate for research outputs.
 
-    This component does not treat source text as executable instructions. It only
-    consumes bounded evidence records and requires every factual claim to name at
-    least one supplied source before marking it supported.
+    Source text is data, never executable instructions. Claims are supported only
+    when a sufficiently large share of their meaningful terms occur in the same
+    evidence record; incidental words such as "was" or "released" cannot by
+    themselves ground an unrelated claim.
     """
 
     def synthesize(self, claims: list[str], evidence: list[EvidenceRecord]) -> SynthesisResult:
@@ -62,15 +64,20 @@ class EvidenceSynthesizer:
     @staticmethod
     def _valid_source(url: str) -> bool:
         try:
-            return urlparse(url).scheme in {"http", "https"} and bool(urlparse(url).netloc)
+            parsed = urlparse(url)
+            return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
         except Exception:
             return False
 
     @staticmethod
-    def _supports(claim: str, evidence: EvidenceRecord) -> bool:
-        haystack = f"{evidence.title} {evidence.excerpt}".lower()
-        words = {word.strip(".,:;!?()[]{}\"").lower() for word in claim.split()}
-        words = {word for word in words if len(word) > 3}
-        if not words:
+    def _terms(text: str) -> set[str]:
+        return {word for word in re.findall(r"[a-z0-9]+", text.lower()) if len(word) > 3}
+
+    @classmethod
+    def _supports(cls, claim: str, evidence: EvidenceRecord) -> bool:
+        claim_terms = cls._terms(claim)
+        evidence_terms = cls._terms(f"{evidence.title} {evidence.excerpt}")
+        if not claim_terms:
             return False
-        return len(words & set(haystack.split())) >= max(1, min(3, len(words) // 3))
+        overlap = len(claim_terms & evidence_terms)
+        return overlap >= max(1, (len(claim_terms) + 1) // 2)
