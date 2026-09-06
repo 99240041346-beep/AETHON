@@ -4,7 +4,7 @@ import json
 import os
 from typing import Any
 
-from aethon.memory_engine import MemoryRecord, PersistentMemoryEngine, validate_namespace, redact_secrets, MemorySecurityError
+from aethon.memory_engine import MemoryRecord, PersistentMemoryEngine, validate_namespace, redact_secrets, MemorySecurityError, MemoryMatch, _terms, _recency_score
 
 
 class MemoryRepository:
@@ -72,7 +72,7 @@ class MemoryRepository:
         limit = max(1, min(limit, 100))
         if not self.use_postgres:
             return self.fallback.search(query, owner_id=owner_id, project_id=project_id, namespace=namespace, limit=limit)
-        terms = [term for term in query.lower().split() if term]
+        terms = _terms(query)
         if not terms:
             return []
         clauses = " OR ".join(["content ILIKE %s" for _ in terms])
@@ -81,11 +81,21 @@ class MemoryRepository:
                   confidence, created_at, updated_at, expires_at, owner_id
                   FROM memories WHERE owner_id=%s AND project_id IS NOT DISTINCT FROM %s
                   AND namespace=%s AND (expires_at IS NULL OR expires_at > NOW())
-                  AND ({clauses}) ORDER BY confidence DESC, updated_at DESC LIMIT %s"""
-        values.append(limit)
+                  AND ({clauses}) ORDER BY updated_at DESC LIMIT %s"""
+        values.append(min(100, max(limit * 5, limit)))
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(values))
-            return [self._row_to_record(row) for row in cur.fetchall()]
+            candidates = [self._row_to_record(row) for row in cur.fetchall()]
+        query_terms = set(terms)
+        matches: list[MemoryMatch] = []
+        for record in candidates:
+            record_terms = set(_terms(f"{record.content} {record.memory_type} {record.source}"))
+            lexical = len(query_terms & record_terms) / max(1, len(query_terms))
+            recency = _recency_score(record.updated_at)
+            score = lexical * 0.65 + recency * 0.15 + record.confidence * 0.20
+            matches.append(MemoryMatch(record, score, lexical, recency, record.confidence))
+        matches.sort(key=lambda item: (-item.score, -item.record.confidence, item.record.memory_id))
+        return [item.record for item in matches[:limit]]
 
     def delete(self, memory_id: str, *, owner_id: str = "local-dev", project_id: str | None = None,
                namespace: str = "default") -> bool:
