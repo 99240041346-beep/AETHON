@@ -20,7 +20,7 @@ def test_scheduler_aging_prevents_starvation():
     try:
         running = scheduler.submit("running", priority=5)
         time.sleep(0.01)
-        old = scheduler.submit("old", priority=10)
+        old = scheduler.submit("old", priority=2)
         high = scheduler.submit("high", priority=1)
         time.sleep(0.03)
         gate.set()
