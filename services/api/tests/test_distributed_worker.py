@@ -21,10 +21,15 @@ class FakePersistence:
         self.claimed = claimed
         self.store = FakeStore()
         self.released = []
+        self.heartbeats = []
 
     def claim_next_task(self, worker_id, lease_seconds):
         value, self.claimed = self.claimed, None
         return value
+
+    def heartbeat_lease(self, task_id, worker_id, token, lease_seconds):
+        self.heartbeats.append((task_id, worker_id, token))
+        return True
 
     def release_lease(self, task_id, worker_id, token):
         self.released.append((task_id, worker_id, token))
