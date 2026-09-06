@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,6 +27,22 @@ class MemoryRecord:
     owner_id: str = "local-dev"
 
 
+@dataclass(frozen=True)
+class MemoryMatch:
+    record: MemoryRecord
+    score: float
+    lexical_score: float
+    recency_score: float
+    confidence_score: float
+
+
+@dataclass(frozen=True)
+class MemoryConflict:
+    key: str
+    memory_ids: list[str]
+    values: list[str]
+
+
 class MemorySecurityError(ValueError):
     pass
 
@@ -42,6 +59,43 @@ def validate_namespace(namespace: str) -> str:
     if not namespace or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", namespace):
         raise MemorySecurityError("invalid memory namespace")
     return namespace
+
+
+def _terms(text: str) -> list[str]:
+    return [term for term in re.findall(r"[\w-]+", text.lower()) if len(term) > 1]
+
+
+def _recency_score(updated_at: str) -> float:
+    try:
+        stamp = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+        age_days = max(0.0, (datetime.now(timezone.utc) - stamp).total_seconds() / 86400.0)
+        return math.exp(-age_days / 30.0)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _memory_key(content: str) -> str | None:
+    match = re.match(r"\s*([A-Za-z][A-Za-z0-9_. -]{1,80})\s*[:=]\s*(.+)", content)
+    return match.group(1).strip().lower() if match else None
+
+
+def detect_memory_conflicts(records: list[MemoryRecord]) -> list[MemoryConflict]:
+    """Detect conservative conflicts only when records explicitly share a key.
+
+    A conflict is a review signal, never an automatic instruction to delete or
+    overwrite memory. Records remain intact until a higher-level policy decides.
+    """
+    groups: dict[str, list[MemoryRecord]] = {}
+    for record in records:
+        key = _memory_key(record.content)
+        if key:
+            groups.setdefault(key, []).append(record)
+    conflicts: list[MemoryConflict] = []
+    for key, items in groups.items():
+        values = {re.sub(r"\s+", " ", item.content.split(":", 1)[-1].split("=", 1)[-1]).strip().lower() for item in items}
+        if len(values) > 1:
+            conflicts.append(MemoryConflict(key, [item.memory_id for item in items], sorted(values)))
+    return conflicts
 
 
 class PersistentMemoryEngine:
@@ -71,15 +125,15 @@ class PersistentMemoryEngine:
             self._records[memory_id] = record
             return record
 
-    def search(self, query: str, *, owner_id: str = "local-dev", project_id: str | None = None,
-               namespace: str = "default", limit: int = 10) -> list[MemoryRecord]:
+    def search_matches(self, query: str, *, owner_id: str = "local-dev", project_id: str | None = None,
+                       namespace: str = "default", limit: int = 10) -> list[MemoryMatch]:
         namespace = validate_namespace(namespace)
         if not owner_id.strip():
             raise MemorySecurityError("owner_id is required")
         limit = max(1, min(limit, 100))
-        terms = [t for t in re.findall(r"[\w-]+", query.lower()) if t]
+        query_terms = set(_terms(query))
         now = datetime.now(timezone.utc)
-        scored: list[tuple[float, MemoryRecord]] = []
+        matches: list[MemoryMatch] = []
         with self._lock:
             records = list(self._records.values())
         for record in records:
@@ -87,18 +141,39 @@ class PersistentMemoryEngine:
                 continue
             if record.expires_at:
                 try:
-                    if datetime.fromisoformat(record.expires_at) <= now:
+                    if datetime.fromisoformat(record.expires_at.replace("Z", "+00:00")) <= now:
                         continue
                 except ValueError:
                     continue
-            haystack = f"{record.content} {record.memory_type} {record.source}".lower()
-            hits = sum(1 for term in terms if term in haystack)
-            if terms and hits == 0:
+            record_terms = set(_terms(f"{record.content} {record.memory_type} {record.source}"))
+            lexical = len(query_terms & record_terms) / max(1, len(query_terms)) if query_terms else 0.0
+            if query_terms and lexical == 0:
                 continue
-            score = (hits / max(1, len(terms))) * 0.8 + record.confidence * 0.2
-            scored.append((score, record))
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        return [record for _, record in scored[:limit]]
+            recency = _recency_score(record.updated_at)
+            confidence = record.confidence
+            score = lexical * 0.65 + recency * 0.15 + confidence * 0.20
+            matches.append(MemoryMatch(record, score, lexical, recency, confidence))
+        matches.sort(key=lambda item: (-item.score, -item.record.confidence, item.record.memory_id))
+        return matches[:limit]
+
+    def search(self, query: str, *, owner_id: str = "local-dev", project_id: str | None = None,
+               namespace: str = "default", limit: int = 10) -> list[MemoryRecord]:
+        return [match.record for match in self.search_matches(query, owner_id=owner_id,
+            project_id=project_id, namespace=namespace, limit=limit)]
+
+    def consolidate_candidates(self, *, owner_id: str = "local-dev", project_id: str | None = None,
+                               namespace: str = "default", limit: int = 100) -> dict[str, object]:
+        namespace = validate_namespace(namespace)
+        with self._lock:
+            records = [r for r in self._records.values()
+                       if r.owner_id == owner_id and r.project_id == project_id and r.namespace == namespace]
+        records = records[:max(1, min(limit, 1000))]
+        conflicts = detect_memory_conflicts(records)
+        by_content: dict[str, list[MemoryRecord]] = {}
+        for record in records:
+            by_content.setdefault(re.sub(r"\s+", " ", record.content.strip()).lower(), []).append(record)
+        duplicates = [[item.memory_id for item in group] for group in by_content.values() if len(group) > 1]
+        return {"records_considered": len(records), "duplicate_groups": duplicates, "conflicts": [conflict.__dict__ for conflict in conflicts]}
 
     def delete(self, memory_id: str, *, owner_id: str = "local-dev", project_id: str | None = None,
                namespace: str = "default") -> bool:
