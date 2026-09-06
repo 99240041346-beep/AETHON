@@ -54,6 +54,13 @@ class AgentRuntime:
             self._transition(task, TaskStatus.EXECUTING)
 
         for _ in range(self.brain.max_steps + self.brain.max_replans + 2):
+            if self.state_store.pause_requested(task.task_id):
+                task.status = TaskStatus.PAUSED
+                task.error = None
+                self._checkpoint(task, plan, observations, "PAUSED", last_verified_step=self._last_verified(plan))
+                self._event(task, "task.paused", {"last_verified_step": self._last_verified(plan), "revision": plan.revision, "completed_steps": list(plan.completed_steps)})
+                self._audit(task, "task_paused", {"last_verified_step": self._last_verified(plan), "revision": plan.revision})
+                return task
             if task.status == TaskStatus.CANCELLED:
                 self._checkpoint(task, plan, observations, "CANCELLED")
                 self._event(task, "task.cancelled", {})
