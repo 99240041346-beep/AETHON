@@ -117,6 +117,26 @@ def get_audit(task_id: UUID, owner_id: str = Depends(owner)):
         raise HTTPException(404, 'task not found')
     return store.audit(task_id)
 
+@app.post('/v1/tasks/{task_id}/pause', response_model=Task)
+def pause_task(task_id: UUID, owner_id: str = Depends(owner)):
+    task = store.get(task_id)
+    if not task or task.owner_id != owner_id:
+        raise HTTPException(404, 'task not found')
+    try:
+        return store.pause(task_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+@app.post('/v1/tasks/{task_id}/resume', response_model=Task)
+def resume_task(task_id: UUID, owner_id: str = Depends(owner)):
+    task = store.get(task_id)
+    if not task or task.owner_id != owner_id:
+        raise HTTPException(404, 'task not found')
+    try:
+        return store.resume(task_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
 @app.post('/v1/tasks/{task_id}/cancel', response_model=Task)
 def cancel_task(task_id: UUID, owner_id: str = Depends(owner)):
     task = store.get(task_id)
