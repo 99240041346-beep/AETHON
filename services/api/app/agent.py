@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from aethon.memory_engine import PersistentMemoryEngine, default_memory_engine
+from aethon.memory_repository import MemoryRepository
 from aethon.model_router import ModelRouter
 from aethon.schemas import Event, Task, TaskStatus
 from aethon.verification import BasicVerifier, Verifier
@@ -11,23 +11,19 @@ class AgentRuntime:
     def __init__(self, verifier: Verifier | None = None, memory=None):
         self.models = ModelRouter()
         self.verifier = verifier or WebAwareVerifier(BasicVerifier())
-        self.memory: PersistentMemoryEngine = memory or default_memory_engine
+        self.memory = memory or MemoryRepository()
         self.events: dict[UUID, list[Event]] = {}
 
     def run(self, task: Task) -> Task:
         self._transition(task, TaskStatus.PLANNING)
-        self._audit(task, "task_started", {"project_id": task.project_id})
+        self._audit(task, "task_started", {"project_id": task.project_id, "owner_id": task.owner_id})
 
-        context = self.memory.search(
-            task.goal,
-            project_id=task.project_id,
-            namespace="project" if task.project_id else "default",
-            limit=5,
-        )
+        namespace = "project" if task.project_id else "default"
+        context = self.memory.search(task.goal, owner_id=task.owner_id, project_id=task.project_id,
+                                     namespace=namespace, limit=5)
         self._event(task, "memory.context_retrieved", {
-            "project_id": task.project_id,
-            "namespace": "project" if task.project_id else "default",
-            "count": len(context),
+            "project_id": task.project_id, "owner_id": task.owner_id,
+            "namespace": namespace, "count": len(context),
             "memory_ids": [item.memory_id for item in context],
         })
 
@@ -42,9 +38,7 @@ class AgentRuntime:
 
         verification = self.verifier.verify(task.goal, answer)
         self._event(task, "verification.completed", {
-            "ok": verification.ok,
-            "reason": verification.reason,
-            "evidence": verification.evidence,
+            "ok": verification.ok, "reason": verification.reason, "evidence": verification.evidence,
         })
         self._audit(task, "verification", {"ok": verification.ok, "reason": verification.reason})
 
@@ -55,20 +49,14 @@ class AgentRuntime:
             self._audit(task, "task_failed", {"reason": task.error})
         else:
             task.result = answer
-            memory_id = f"task:{task.task_id}:result"
             record = self.memory.put(
-                memory_id,
-                answer,
-                project_id=task.project_id,
-                namespace="project" if task.project_id else "default",
-                memory_type="episodic",
-                source="verified_task_result",
-                confidence=1.0,
+                f"task:{task.task_id}:result", answer, owner_id=task.owner_id,
+                project_id=task.project_id, namespace=namespace, memory_type="episodic",
+                source="verified_task_result", confidence=1.0,
             )
             self._event(task, "memory.result_stored", {
-                "project_id": task.project_id,
-                "namespace": record.namespace,
-                "memory_id": record.memory_id,
+                "project_id": task.project_id, "owner_id": task.owner_id,
+                "namespace": record.namespace, "memory_id": record.memory_id,
             })
             self._transition(task, TaskStatus.SUCCEEDED)
             self._audit(task, "task_succeeded", {"verified": True})
@@ -82,6 +70,4 @@ class AgentRuntime:
         self._event(task, "audit." + action, data)
 
     def _event(self, task, typ, data):
-        self.events.setdefault(task.task_id, []).append(
-            Event(task_id=task.task_id, type=typ, data=data)
-        )
+        self.events.setdefault(task.task_id, []).append(Event(task_id=task.task_id, type=typ, data=data))
