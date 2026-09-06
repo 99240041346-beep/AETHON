@@ -4,12 +4,13 @@ from aethon.memory import InMemoryStore
 from aethon.model_router import ModelRouter
 from aethon.schemas import Event, Task, TaskStatus
 from aethon.verification import BasicVerifier, Verifier
+from aethon.web_runtime import WebAwareVerifier
 
 
 class AgentRuntime:
     def __init__(self, verifier: Verifier | None = None, memory=None):
         self.models = ModelRouter()
-        self.verifier = verifier or BasicVerifier()
+        self.verifier = verifier or WebAwareVerifier(BasicVerifier())
         self.memory = memory or InMemoryStore()
         self.events: dict[UUID, list[Event]] = {}
 
