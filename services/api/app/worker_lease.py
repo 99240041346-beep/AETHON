@@ -11,6 +11,10 @@ class LeaseConflict(RuntimeError):
     pass
 
 
+class LeaseLost(RuntimeError):
+    pass
+
+
 class WorkerLeaseStore:
     """Durable task leases preventing duplicate worker ownership."""
 
@@ -39,10 +43,10 @@ class WorkerLeaseStore:
         now = self._now()
         with self._lock:
             row = self._conn.execute(
-                "SELECT worker_id, lease_token, expires_at FROM worker_leases WHERE task_id=?", (task_id,)
+                "SELECT expires_at FROM worker_leases WHERE task_id=?", (task_id,)
             ).fetchone()
-            if row and row[2] > now and row[0] != worker_id:
-                raise LeaseConflict("task is leased by another worker")
+            if row and row[0] > now:
+                raise LeaseConflict("task is already leased")
             self._conn.execute(
                 "INSERT INTO worker_leases(task_id,worker_id,lease_token,acquired_at,heartbeat_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET worker_id=excluded.worker_id, lease_token=excluded.lease_token, acquired_at=excluded.acquired_at, heartbeat_at=excluded.heartbeat_at, expires_at=excluded.expires_at",
                 (task_id, worker_id, token, self._iso(), self._iso(), now + ttl_seconds),
@@ -54,10 +58,10 @@ class WorkerLeaseStore:
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be > 0")
         with self._lock:
-            row = self._conn.execute("SELECT worker_id, lease_token FROM worker_leases WHERE task_id=?", (task_id,)).fetchone()
-            if not row or row[0] != worker_id or row[1] != lease_token:
+            row = self._conn.execute("SELECT worker_id, lease_token, expires_at FROM worker_leases WHERE task_id=?", (task_id,)).fetchone()
+            if not row or row[0] != worker_id or row[1] != lease_token or row[2] <= self._now():
                 return False
-            self._conn.execute("UPDATE worker_leases SET heartbeat_at=?, expires_at=? WHERE task_id=?", (self._iso(), self._now() + ttl_seconds, task_id))
+            self._conn.execute("UPDATE worker_leases SET heartbeat_at=?, expires_at=? WHERE task_id=? AND worker_id=? AND lease_token=?", (self._iso(), self._now() + ttl_seconds, task_id, worker_id, lease_token))
             self._conn.commit()
             return True
 
