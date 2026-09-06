@@ -38,6 +38,7 @@ def test_priority_aging_promotes_long_waiting_work():
         low = scheduler.submit("low", priority=10)
         time.sleep(0.04)
         high = scheduler.submit("high", priority=1)
+        time.sleep(0.08)
         gate.set()
         assert blocker.result(timeout=2) == "blocker"
         assert low.result(timeout=2) == "low"
