@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import UUID
 
 from aethon.agent import AgentRuntime
+from aethon.agent_state import AgentStateStore
 from aethon.schemas import Event, Task, TaskCreate, TaskStatus
 
 
@@ -18,7 +19,8 @@ class TaskStore:
         path = database_path or os.getenv("AETHON_SQLITE_PATH", ".aethon/aethon.db")
         self.database_path = Path(path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self.runtime = AgentRuntime()
+        self.state_store = AgentStateStore(str(self.database_path.with_name(self.database_path.stem + "_agent_state.db")))
+        self.runtime = AgentRuntime(state_store=self.state_store)
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -107,11 +109,41 @@ class TaskStore:
         return [{"audit_id": r["audit_id"], "task_id": r["task_id"], "action": r["action"],
                  "data": json.loads(r["data_json"]), "created_at": r["created_at"]} for r in rows]
 
+    def pause(self, task_id: UUID) -> Task | None:
+        task = self.get(task_id)
+        if task is None:
+            return None
+        if task.status in {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED}:
+            raise ValueError("task is already terminal")
+        self.state_store.request_pause(task_id)
+        if task.status != TaskStatus.PAUSED:
+            task.status = TaskStatus.PAUSED
+            self._persist_task(task)
+        self.runtime._event(task, "task.pause_requested", {"task_id": str(task_id)})
+        self._persist_events(task_id)
+        return task
+
+    def resume(self, task_id: UUID) -> Task | None:
+        task = self.get(task_id)
+        if task is None:
+            return None
+        if task.status != TaskStatus.PAUSED:
+            raise ValueError("task is not paused")
+        if self.state_store.load(task_id) is None:
+            raise ValueError("no persisted agent state exists for task")
+        self.state_store.clear_pause(task_id)
+        task.error = None
+        result = self.runtime.run(task)
+        self._persist_task(result)
+        self._persist_events(result.task_id)
+        return result
+
     def cancel(self, task_id: UUID) -> Task | None:
         task = self.get(task_id)
         if task is None:
             return None
         if task.status not in {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED}:
             task.status = TaskStatus.CANCELLED
+            self.state_store.clear_pause(task_id)
             self._persist_task(task)
         return task
