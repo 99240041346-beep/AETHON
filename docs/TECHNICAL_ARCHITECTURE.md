@@ -5,7 +5,7 @@
 
 ## 1. Design Goal
 
-AETHON-0 is a provider-agnostic, tool-using agent runtime. The runtime must make task state, permissions, tool calls, observations, verification, and failures explicit and auditable.
+AETHON-0 is a provider-agnostic, tool-using agent runtime. The runtime must make task state, permissions, tool calls, observations, verification, failures, and scheduling explicit and auditable.
 
 The architecture separates:
 
@@ -15,6 +15,7 @@ The architecture separates:
 - generation from verification
 - transient state from durable memory
 - user intent from privileged actions
+- task admission from task execution
 
 ## 2. Core Task Contract
 
@@ -46,6 +47,7 @@ AWAITING_APPROVAL
 EXECUTING
 VERIFYING
 REPLANNING
+PAUSED
 SUCCEEDED
 FAILED
 BLOCKED
@@ -66,7 +68,7 @@ receive(task)
   → execute_step()
   → observe()
   → verify()
-  → continue | replan | ask | block | finish
+  → continue | replan | ask | pause | block | finish
 ```
 
 The runtime must support cancellation, timeouts, bounded retries, and recovery from tool failures.
@@ -254,7 +256,35 @@ The policy engine evaluates identity, scope, permission, risk, resource, reversi
 
 Security controls include least privilege, credential isolation, sandboxing, resource limits, secret redaction, audit logging, cancellation, and tenant/project isolation.
 
-## 11. API Boundary
+## 11. Scheduler Contract
+
+AETHON-0 uses a bounded in-process priority scheduler as its first concurrency implementation:
+
+```text
+Task request
+    ↓
+Priority queue
+    ↓
+N bounded workers
+ ┌──────┬──────┬──────┐
+Agent  Agent  Agent  ...
+ └──────┴──────┴──────┘
+    ↓
+Durable task/agent checkpoints
+```
+
+Rules:
+
+- lower numeric priority executes first
+- equal priority is FIFO
+- `AETHON_MAX_CONCURRENT_TASKS` caps active workers
+- scheduler admission never bypasses Safety Kernel authorization
+- worker failures propagate to the task's normal recovery path
+- dependency-aware scheduling is exposed at the scheduler primitive and can be extended to task DAGs without weakening security
+
+The current implementation intentionally uses a bounded thread pool rather than introducing Redis/Kubernetes before the workload requires distributed coordination.
+
+## 12. API Boundary
 
 AETHON-0 API resources:
 
@@ -262,8 +292,12 @@ AETHON-0 API resources:
 POST   /v1/tasks
 GET    /v1/tasks/{task_id}
 POST   /v1/tasks/{task_id}/cancel
+POST   /v1/tasks/{task_id}/pause
+POST   /v1/tasks/{task_id}/resume
 GET    /v1/tasks/{task_id}/events
-POST   /v1/tasks/{task_id}/approval
+GET    /v1/tasks/{task_id}/plan
+GET    /v1/tasks/{task_id}/audit
+GET    /v1/scheduler
 GET    /v1/tools
 POST   /v1/memory/search
 GET    /health
@@ -272,15 +306,19 @@ GET    /ready
 
 The external API must validate all input, authenticate users, enforce authorization, return structured errors, and attach correlation/request IDs.
 
-## 12. Event Model
+## 13. Event Model
 
 Important runtime events include:
 
 ```text
 task.created
-task.status_changed
+task.queued
+task.state_changed
+task.paused
+task.pause_requested
 plan.created
 plan.replaced
+plan.replanned
 model.requested
 model.completed
 tool.requested
@@ -292,14 +330,14 @@ approval.granted
 approval.denied
 verification.completed
 memory.written
-security.blocked
 task.completed
 task.failed
+task.blocked
 ```
 
 Events form the basis of observability, auditability, replay/debugging, and evaluation.
 
-## 13. Persistence Strategy
+## 14. Persistence Strategy
 
 Initial production-oriented direction:
 
@@ -308,13 +346,13 @@ Initial production-oriented direction:
 - Redis only for transient queues/cache/coordination when justified
 - object storage for large artifacts
 
-The first implementation should avoid adding infrastructure that is not required by the current milestone.
+The current AETHON-0 scheduler is intentionally local and bounded. A later distributed scheduler can preserve the same task/checkpoint contracts while moving queue ownership and worker leases into durable infrastructure.
 
-## 14. Repository Mapping
+## 15. Repository Mapping
 
 ```text
 apps/web                 User interface
-services/api             HTTP/API boundary
+services/api             HTTP/API boundary and AETHON-0 scheduler
 services/orchestrator    Task lifecycle and planning
 services/memory          Memory operations
 services/inference       Model provider abstraction/router
@@ -325,13 +363,15 @@ packages/schemas         Shared typed schemas
 packages/shared          Common utilities
 ```
 
-## 15. Observability
+## 16. Observability
 
-Every task, model call, tool call, security decision, and verification step should be traceable through a correlation ID.
+Every task, model call, tool call, security decision, scheduler admission, and verification step should be traceable through a correlation ID.
 
 Minimum telemetry:
 
 - request/task latency
+- queued time and execution time
+- active/queued worker counts
 - model latency and token usage
 - tool success/failure rate
 - retry count
@@ -340,7 +380,7 @@ Minimum telemetry:
 - task completion status
 - estimated cost
 
-## 16. Failure Semantics
+## 17. Failure Semantics
 
 AETHON must distinguish:
 
@@ -350,24 +390,26 @@ AETHON must distinguish:
 - authorization denial
 - timeout
 - cancellation
+- pause
 - verification failure
 - unavailable dependency
 - policy block
+- scheduler shutdown/admission failure
 
 Retries must be bounded and must not repeat non-idempotent side effects without explicit protection.
 
-## 17. Definition of Done for Milestone 0.2
+## 18. Definition of Done for Milestone 0.2
 
 The architecture milestone is complete when:
 
-1. Task, plan, tool, model, memory, verification, security, and event contracts are documented.
+1. Task, plan, tool, model, memory, verification, security, event, and scheduler contracts are documented.
 2. Service boundaries are explicit.
 3. Privileged actions require policy evaluation.
 4. Provider-specific model code is isolated behind an interface.
 5. Runtime states and failure semantics are explicit.
 6. The contracts are implementable as typed schemas in Phase 1.
 
-## 18. Next Implementation Milestone
+## 19. Next Implementation Milestone
 
 **Phase 1 — AETHON-0 Foundation**
 
@@ -376,6 +418,7 @@ Implement the smallest end-to-end vertical slice:
 ```text
 Web/API request
 → Task creation
+→ Scheduler
 → Orchestrator
 → Model router
 → Tool selection
