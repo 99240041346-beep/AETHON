@@ -9,11 +9,12 @@ from uuid import UUID
 
 from aethon.agent import AgentRuntime
 from aethon.agent_state import AgentStateStore
+from aethon.scheduler import TaskScheduler
 from aethon.schemas import Event, Task, TaskCreate, TaskStatus
 
 
 class TaskStore:
-    """Durable task/event store with SQLite as the AETHON-0 local backend."""
+    """Durable task/event store with bounded concurrent agent scheduling."""
 
     def __init__(self, database_path: str | None = None):
         path = database_path or os.getenv("AETHON_SQLITE_PATH", ".aethon/aethon.db")
@@ -21,6 +22,7 @@ class TaskStore:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.state_store = AgentStateStore(str(self.database_path.with_name(self.database_path.stem + "_agent_state.db")))
         self.runtime = AgentRuntime(state_store=self.state_store)
+        self.scheduler = TaskScheduler(self.runtime.run)
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -80,10 +82,15 @@ class TaskStore:
     def create(self, request: TaskCreate) -> Task:
         task = Task(goal=request.goal, project_id=request.project_id, priority=request.priority, owner_id=request.owner_id)
         self._persist_task(task)
-        result = self.runtime.run(task)
+        self.runtime._event(task, "task.queued", {"priority": task.priority, "scheduler": "bounded-thread-pool"})
+        self._persist_events(task.task_id)
+        result = self.scheduler.submit_and_wait(task, priority=task.priority)
         self._persist_task(result)
         self._persist_events(result.task_id)
         return result
+
+    def scheduler_status(self) -> dict[str, int]:
+        return self.scheduler.snapshot()
 
     def get(self, task_id: UUID) -> Task | None:
         with self._connect() as conn:
@@ -133,7 +140,7 @@ class TaskStore:
             raise ValueError("no persisted agent state exists for task")
         self.state_store.clear_pause(task_id)
         task.error = None
-        result = self.runtime.run(task)
+        result = self.scheduler.submit_and_wait(task, priority=task.priority)
         self._persist_task(result)
         self._persist_events(result.task_id)
         return result
