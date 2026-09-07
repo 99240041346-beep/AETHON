@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Iterable
 
 
 class StepKind(str, Enum):
@@ -41,6 +41,7 @@ class Plan:
     revision: int = 0
     completed_steps: list[str] = field(default_factory=list)
     recovery_history: list[dict[str, Any]] = field(default_factory=list)
+    decision_context: tuple[str, ...] = ()
 
 
 @dataclass
@@ -57,19 +58,23 @@ class AgentBrain:
         self.max_steps = max_steps
         self.max_replans = max_replans
 
-    def initial_plan(self, goal: str, tool_names: set[str] | None = None) -> Plan:
+    def initial_plan(self, goal: str, tool_names: set[str] | None = None, decision_context: Iterable[str] = ()) -> Plan:
         text = goal.strip()
         steps: list[PlanStep] = []
         lowered = text.lower()
         tools = tool_names or set()
-        if any(word in lowered for word in ("search", "latest", "research", "find")) and "web_search" in tools:
+        context = tuple(str(item).strip()[:4000] for item in decision_context if str(item).strip())[:5]
+        context_text = " ".join(context).lower()
+        research_signal = any(word in lowered for word in ("search", "latest", "research", "find"))
+        research_signal = research_signal or ("research" in context_text and any(x in lowered for x in ("answer", "information", "explain")))
+        if research_signal and "web_search" in tools:
             steps.append(PlanStep("step-1", "Search for relevant public information", StepKind.TOOL, "web_search", {"query": text}))
             steps.append(PlanStep("step-2", "Synthesize and verify the gathered evidence", StepKind.REASON, depends_on=["step-1"]))
             steps.append(PlanStep("step-3", "Verify the candidate result", StepKind.VERIFY, depends_on=["step-2"]))
         else:
             steps.append(PlanStep("step-1", "Reason about the user's goal and produce a candidate answer", StepKind.REASON))
             steps.append(PlanStep("step-2", "Verify the candidate answer", StepKind.VERIFY, depends_on=["step-1"]))
-        return Plan(goal=text, steps=steps[: self.max_steps])
+        return Plan(goal=text, steps=steps[: self.max_steps], decision_context=context)
 
     def next_decision(self, plan: Plan) -> BrainDecision:
         if plan.revision > self.max_replans:
@@ -104,24 +109,18 @@ class AgentBrain:
         try:
             step = self._find(plan, step_id)
         except KeyError:
-            # If a recovery caller names a not-yet-materialized step, reopen the
-            # latest existing candidate rather than inventing an unconnected step.
             if not plan.steps:
                 raise
             step = plan.steps[-1]
-
         failure = self.classify_failure(reason)
         tools = available_tools or set()
         observations = observations or []
-
         if plan.revision >= self.max_replans:
             step.status = "FAILED"
             return BrainDecision("BLOCK", step=step, reason="replan budget exhausted")
-
         plan.revision += 1
         old_tool = step.tool
         strategy = "bounded_retry"
-
         if step.kind == StepKind.TOOL:
             alternative = self._alternative_tool(old_tool, tools, step.arguments)
             if alternative and alternative != old_tool:
@@ -146,7 +145,6 @@ class AgentBrain:
         else:
             step.status = "PENDING"
             strategy = "reasoning_retry"
-
         plan.recovery_history.append({"revision": plan.revision, "step_id": step_id, "failure_class": failure.value, "strategy": strategy, "previous_tool": old_tool, "new_tool": step.tool, "reason": reason})
         return BrainDecision("REPLAN", step=step, reason=f"{strategy}: {reason}")
 
