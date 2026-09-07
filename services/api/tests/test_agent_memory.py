@@ -50,9 +50,26 @@ def test_agent_retrieves_scoped_project_memory_before_reasoning():
     assert 'do not expose this' not in model.prompts[0]
 
     stored = memory.search('verified answer', project_id='alpha', namespace='project')
-    assert len(stored) == 1
-    assert stored[0].memory_type == 'episodic'
-    assert stored[0].source == 'verified_task_result'
+    assert len(stored) == 2
+    assert any(item.memory_type == 'episodic' and item.source == 'verified_task_result' for item in stored)
+    learning = memory.search('Goal What framework does the AETHON API use Result verified answer', project_id='alpha', namespace='project')
+    assert any(item.memory_type == 'semantic' and item.source == 'agent_learning' and item.confidence == 1.0 for item in learning)
+
+    other_scope = memory.search('verified answer', project_id='beta', namespace='project')
+    assert other_scope == []
+
+
+def test_agent_learning_is_owner_scoped():
+    memory = PersistentMemoryEngine()
+    runtime = AgentRuntime(verifier=PassingVerifier(), memory=memory)
+    runtime.models = RecordingModel()
+    task = runtime.run(Task(goal='learn a result', project_id='alpha', owner_id='owner-a'))
+
+    assert task.status == TaskStatus.SUCCEEDED
+    own = memory.search('learn a result verified answer', owner_id='owner-a', project_id='alpha', namespace='project')
+    other = memory.search('learn a result verified answer', owner_id='owner-b', project_id='alpha', namespace='project')
+    assert any(item.source == 'agent_learning' for item in own)
+    assert other == []
 
 
 def test_agent_memory_context_is_not_authority():
