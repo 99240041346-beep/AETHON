@@ -11,6 +11,7 @@ from aethon.memory_repository import MemoryRepository
 from aethon.model_router import ModelRouter
 from aethon.schemas import Event, Task, TaskStatus, ToolRequest
 from aethon.security import SafetyKernel
+from aethon.strategy_selection import AdaptiveStrategySelector
 from aethon.tools import ToolRegistry
 from aethon.verification import BasicVerifier, Verifier
 from aethon.web_runtime import WebAwareVerifier
@@ -32,6 +33,7 @@ class AgentRuntime:
         self.learning = learning or AgentLearning()
         self.experience_generalizer = ExperienceGeneralizer()
         self.experience_retriever = ExperienceRetriever()
+        self.strategy_selector = AdaptiveStrategySelector()
         self.events: dict[UUID, list[Event]] = {}
 
     def run(self, task: Task) -> Task:
@@ -209,7 +211,11 @@ class AgentRuntime:
             )
             for pattern in patterns
         )
-        return self.experience_retriever.build_context(task.goal, candidates)
+        ranked = self.experience_retriever.rank(task.goal, candidates)
+        selection = self.strategy_selector.select(task.goal, ranked)
+        if selection.selected:
+            self._event(task, "strategy.selected", {"experience_id": selection.selected.experience_id, "score": selection.selected.score, "confidence": selection.selected.confidence, "reason": selection.selected.reason})
+        return self.experience_retriever.build_context(task.goal, candidates) + ((selection.context,) if selection.selected else ())
 
     def _replan(self, task, plan: Plan, step, reason: str, observations: list[object]) -> BrainDecision:
         decision = self.brain.replan(plan, step.step_id, reason, available_tools={spec.name for spec in self.tools.list()}, observations=observations)
