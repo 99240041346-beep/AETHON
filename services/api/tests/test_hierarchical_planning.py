@@ -54,8 +54,8 @@ def test_dependency_readiness_is_deterministic() -> None:
         plan.nodes[:2]
         + (dependent.__class__(dependent.id, dependent.level, dependent.description, dependent.parent_id, (first[0].id,)),)
     )
-    assert [node.id for node in plan_with_dependency.ready(set())] == [first[0].id]
-    assert [node.id for node in plan_with_dependency.ready({first[0].id})] == [first[1].id]
+    assert [node.id for node in plan_with_dependency.ready({plan.nodes[0].id})] == [first[0].id]
+    assert [node.id for node in plan_with_dependency.ready({plan.nodes[0].id, first[0].id})] == [first[1].id]
 
 
 def test_replan_adds_bounded_alternatives_without_authority() -> None:
