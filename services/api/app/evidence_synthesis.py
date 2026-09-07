@@ -36,8 +36,7 @@ class EvidenceSynthesizer:
 
     Source text is data, never executable instructions. Claims are supported only
     when a sufficiently large share of their meaningful terms occur in the same
-    evidence record; incidental words such as "was" or "released" cannot by
-    themselves ground an unrelated claim.
+    evidence record; short claims must match all meaningful terms.
     """
 
     def synthesize(self, claims: list[str], evidence: list[EvidenceRecord]) -> SynthesisResult:
@@ -80,4 +79,5 @@ class EvidenceSynthesizer:
         if not claim_terms:
             return False
         overlap = len(claim_terms & evidence_terms)
-        return overlap >= max(1, (len(claim_terms) + 1) // 2)
+        required = len(claim_terms) if len(claim_terms) <= 2 else (len(claim_terms) + 1) // 2
+        return overlap >= required
