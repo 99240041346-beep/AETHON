@@ -242,3 +242,37 @@ class AgentRuntime:
     def _checkpoint(self, task, plan: Plan, observations: list[object], status: str, last_verified_step: str | None = None) -> None:
         prior = self.state_store.load(task.task_id)
         verified = last_verified_step or (prior.last_verified_step if prior else self._last_verified(plan))
+        self.state_store.save(AgentState(task_id=str(task.task_id), plan=self._plan_data(plan), observations=list(observations), approvals=list(prior.approvals) if prior else [], recovery_history=list(plan.recovery_history), last_verified_step=verified, status=status))
+
+    @staticmethod
+    def _plan_data(plan: Plan) -> dict:
+        return {"goal": plan.goal, "revision": plan.revision, "completed_steps": list(plan.completed_steps), "recovery_history": list(plan.recovery_history), "steps": [AgentRuntime._step_data(s) | {"arguments": s.arguments} for s in plan.steps]}
+
+    @staticmethod
+    def _plan_from_state(data: dict) -> Plan:
+        steps = [PlanStep(s["step_id"], s["description"], StepKind(s["kind"]), s.get("tool"), dict(s.get("arguments", {})), list(s.get("depends_on", [])), int(s.get("attempts", 0)), int(s.get("max_attempts", 2)), s.get("status", "PENDING")) for s in data.get("steps", [])]
+        return Plan(data.get("goal", ""), steps, int(data.get("revision", 0)), list(data.get("completed_steps", [])), list(data.get("recovery_history", [])))
+
+    @staticmethod
+    def _last_verified(plan: Plan) -> str | None:
+        for step in reversed(plan.steps):
+            if step.kind == StepKind.VERIFY and step.status == "SUCCEEDED": return step.step_id
+        return None
+
+    def _emit_plan(self, task: Task, plan: Plan, event_type: str) -> None:
+        self._event(task, event_type, {"revision": plan.revision, "goal": plan.goal, "steps": [self._step_data(step) for step in plan.steps], "completed_steps": list(plan.completed_steps), "recovery_history": list(plan.recovery_history)})
+
+    def _emit_replan(self, task: Task, plan: Plan, decision: BrainDecision) -> None:
+        self._transition(task, TaskStatus.REPLANNING)
+        self._event(task, "plan.replanned", {"revision": plan.revision, "action": decision.action, "reason": decision.reason, "step_id": decision.step.step_id if decision.step else None, "steps": [self._step_data(step) for step in plan.steps], "completed_steps": list(plan.completed_steps), "recovery_history": list(plan.recovery_history)})
+
+    @staticmethod
+    def _step_data(step) -> dict:
+        return {"step_id": step.step_id, "description": step.description, "kind": step.kind.value, "tool": step.tool, "depends_on": step.depends_on, "attempts": step.attempts, "max_attempts": step.max_attempts, "status": step.status}
+
+    def _transition(self, task, status):
+        task.status = status
+        self._event(task, "task.state_changed", {"status": status.value})
+
+    def _audit(self, task, action: str, data: dict): self._event(task, "audit." + action, data)
+    def _event(self, task, typ, data): self.events.setdefault(task.task_id, []).append(Event(task_id=task.task_id, type=typ, data=data))
