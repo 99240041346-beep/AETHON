@@ -33,7 +33,7 @@ def test_branching_and_total_node_bounds_are_enforced() -> None:
 def test_empty_and_duplicate_children_are_dropped_deterministically() -> None:
     planner = HierarchicalPlanner(max_depth=2, max_branching=5)
     plan = planner.build("G", {"G": [" A ", "a", "", "B"]})
-    assert [node.description for node in plan.children("level-1-1")] == ["A", "a", "B"]
+    assert [node.description for node in plan.children("level-1-1")] == ["A", "B"]
 
 
 def test_invalid_bounds_are_rejected() -> None:
