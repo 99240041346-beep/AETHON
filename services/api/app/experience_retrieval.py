@@ -24,7 +24,10 @@ class RankedExperience:
 
 
 class ExperienceRetriever:
-    """Rank scoped experience patterns for planning without granting authority."""
+    """Rank scoped experience patterns for planning without granting authority.
+
+    17P contract: retrieval is advisory context only and never execution authority.
+    """
 
     def __init__(self, *, max_results: int = 5, max_chars: int = 600, min_score: float = 0.20) -> None:
         if not 1 <= max_results <= 20:
