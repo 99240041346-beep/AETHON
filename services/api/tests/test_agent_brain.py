@@ -1,4 +1,5 @@
 from aethon.agent_brain import AgentBrain, FailureClass, StepKind
+from aethon.decision_context import DecisionContextBuilder
 
 
 def test_search_goal_gets_tool_plan():
@@ -7,6 +8,22 @@ def test_search_goal_gets_tool_plan():
     assert plan.steps[0].tool == "web_search"
     assert plan.steps[1].depends_on == ["step-1"]
     assert plan.steps[2].kind == StepKind.VERIFY
+
+
+def test_memory_context_can_trigger_bounded_research_plan():
+    brain = AgentBrain()
+    context = DecisionContextBuilder(max_items=5, max_chars=4000).build(["Prior research indicates this topic needs fresh public research."])
+    plan = brain.initial_plan("explain the topic", {"web_search"}, context.memories)
+    assert plan.steps[0].tool == "web_search"
+    assert plan.decision_context == context.memories
+    assert len(plan.decision_context) <= 5
+
+
+def test_non_research_memory_does_not_change_simple_plan():
+    brain = AgentBrain()
+    plan = brain.initial_plan("answer this", {"web_search"}, ("A normal historical note.",))
+    assert plan.steps[0].kind == StepKind.REASON
+    assert plan.steps[0].tool is None
 
 
 def test_dependencies_block_execution_until_success():
