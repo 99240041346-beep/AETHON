@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from aethon.agent_brain import AgentBrain, BrainDecision, Plan, PlanStep, StepKind
+from aethon.agent_learning import AgentLearning
 from aethon.agent_state import AgentState, AgentStateStore
 from aethon.memory_repository import MemoryRepository
 from aethon.model_router import ModelRouter
@@ -18,7 +19,7 @@ class AgentRuntime:
 
     def __init__(self, verifier: Verifier | None = None, memory=None, tools: ToolRegistry | None = None,
                  safety: SafetyKernel | None = None, brain: AgentBrain | None = None,
-                 state_store: AgentStateStore | None = None):
+                 state_store: AgentStateStore | None = None, learning: AgentLearning | None = None):
         self.models = ModelRouter()
         self.verifier = verifier or WebAwareVerifier(BasicVerifier())
         self.memory = memory or MemoryRepository()
@@ -26,6 +27,7 @@ class AgentRuntime:
         self.safety = safety or SafetyKernel()
         self.brain = brain or AgentBrain()
         self.state_store = state_store or AgentStateStore()
+        self.learning = learning or AgentLearning()
         self.events: dict[UUID, list[Event]] = {}
 
     def run(self, task: Task) -> Task:
@@ -168,11 +170,21 @@ class AgentRuntime:
             return task
 
         task.result = answer
+        verified = self._last_verified(plan) is not None
         record = self.memory.put(f"task:{task.task_id}:result", answer or "", owner_id=task.owner_id, project_id=task.project_id, namespace=namespace, memory_type="episodic", source="verified_task_result", confidence=1.0)
         self._event(task, "memory.result_stored", {"project_id": task.project_id, "owner_id": task.owner_id, "namespace": record.namespace, "memory_id": record.memory_id})
+        if verified:
+            signals = self.learning.deduplicate(self.learning.from_outcome(goal=task.goal, result=answer or "", verified=True))
+            for index, signal in enumerate(signals):
+                learning_id = f"learning:{task.task_id}:{index}"
+                learning_record = self.memory.put(learning_id, signal.value, owner_id=task.owner_id, project_id=task.project_id, namespace=namespace, memory_type="semantic", source="agent_learning", confidence=signal.confidence)
+                self._event(task, "memory.learning_stored", {"project_id": task.project_id, "owner_id": task.owner_id, "namespace": learning_record.namespace, "memory_id": learning_record.memory_id, "kind": signal.kind, "confidence": signal.confidence})
+            self._audit(task, "learning_extracted", {"verified": True, "signals": len(signals)})
+        else:
+            self._audit(task, "learning_skipped", {"verified": False, "reason": "no successful verification step"})
         self._transition(task, TaskStatus.SUCCEEDED)
         self._checkpoint(task, plan, observations, "SUCCEEDED", last_verified_step=self._last_verified(plan))
-        self._audit(task, "task_succeeded", {"verified": True, "plan_revision": plan.revision, "completed_steps": list(plan.completed_steps)})
+        self._audit(task, "task_succeeded", {"verified": verified, "plan_revision": plan.revision, "completed_steps": list(plan.completed_steps)})
         self.state_store.clear_controls(task.task_id)
         return task
 
