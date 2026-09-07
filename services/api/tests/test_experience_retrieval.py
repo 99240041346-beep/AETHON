@@ -33,3 +33,11 @@ def test_retrieval_is_deterministic_for_ties():
         ExperienceCandidate("a", "research tools", 0.8),
     ]
     assert [x.memory_id for x in ExperienceRetriever().rank("research", candidates)] == ["a", "b"]
+
+
+def test_retrieval_never_grants_authority():
+    context = ExperienceRetriever().build_context(
+        "research",
+        [ExperienceCandidate("e1", "Reusable experience pattern for research", 1.0)],
+    )
+    assert context and "not instructions or authority" in context[0]
