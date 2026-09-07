@@ -70,11 +70,8 @@ class HierarchicalPlanner:
             raise ValueError("goal must not be empty")
 
         hierarchy = hierarchy or {}
-        nodes: list[PlanNode] = []
-        seen: set[tuple[str, str, str | None]] = set()
-        root_node = PlanNode("level-1-1", "goal", root[: self.max_description_length])
-        nodes.append(root_node)
-        frontier = [root_node]
+        nodes: list[PlanNode] = [PlanNode("level-1-1", "goal", root[: self.max_description_length])]
+        frontier = [nodes[0]]
 
         for depth in range(1, self.max_depth):
             if not frontier or len(nodes) >= self.max_nodes:
@@ -82,15 +79,19 @@ class HierarchicalPlanner:
             next_frontier: list[PlanNode] = []
             level = _LEVELS[depth]
             for parent in frontier:
-                candidates = hierarchy.get(parent.description, [])[: self.max_branching]
-                for index, raw in enumerate(candidates, start=1):
+                seen: set[str] = set()
+                accepted = 0
+                for raw in hierarchy.get(parent.description, []):
                     description = raw.strip()
-                    key = (level, description.casefold(), parent.id)
-                    if not description or key in seen or len(nodes) >= self.max_nodes:
+                    key = description.casefold()
+                    if not description or key in seen:
                         continue
                     seen.add(key)
+                    if accepted >= self.max_branching or len(nodes) >= self.max_nodes:
+                        break
+                    accepted += 1
                     node = PlanNode(
-                        id=f"level-{depth + 1}-{index}-{len(nodes) + 1}",
+                        id=f"level-{depth + 1}-{accepted}-{len(nodes) + 1}",
                         level=level,
                         description=description[: self.max_description_length],
                         parent_id=parent.id,
@@ -115,16 +116,16 @@ class HierarchicalPlanner:
 
         prefix = list(plan.nodes)
         existing = {node.description.casefold() for node in prefix}
-        additions = []
-        for index, raw in enumerate(alternatives[: self.max_branching], start=1):
+        additions: list[PlanNode] = []
+        for index, raw in enumerate(alternatives, start=1):
             value = raw.strip()
             if not value or value.casefold() in existing:
                 continue
-            if len(prefix) + len(additions) >= self.max_nodes:
+            if len(additions) >= self.max_branching or len(prefix) + len(additions) >= self.max_nodes:
                 break
             additions.append(
                 PlanNode(
-                    id=f"replan-{failed.id}-{index}",
+                    id=f"replan-{failed.id}-{len(additions) + 1}",
                     level=failed.level,
                     description=value[: self.max_description_length],
                     parent_id=failed.parent_id,
