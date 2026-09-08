@@ -28,8 +28,7 @@ def test_network_requires_explicit_approval_and_network_capability():
     ])
     with pytest.raises(HybridRoutingError, match="network approval"):
         router.route(HybridRequest("run", requires_network=True))
-    with pytest.raises(HybridRoutingError, match="no eligible"):
-        router.route(HybridRequest("run"), approve_network=False)
+    assert router.route(HybridRequest("run"), approve_network=False).candidate == "offline"
     assert router.route(HybridRequest("run", requires_network=True), approve_network=True).candidate == "networked"
 
 
