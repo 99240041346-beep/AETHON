@@ -6,6 +6,7 @@
         android:allowBackup="false"
         android:label="AETHON"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
         <activity
             android:name=".MainActivity"
