@@ -54,11 +54,11 @@ class AgentStateStore:
         import json
 
         state.updated_at = self._now()
-        self._memory[state.task_id] = state
+        self._memory[str(state.task_id)] = state
         if self._conn is not None:
             self._conn.execute(
                 "INSERT INTO agent_state(task_id,state_json,updated_at) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at",
-                (state.task_id, json.dumps(asdict(state)), state.updated_at),
+                (str(state.task_id), json.dumps(asdict(state), default=str), state.updated_at),
             )
             self._conn.commit()
         return state

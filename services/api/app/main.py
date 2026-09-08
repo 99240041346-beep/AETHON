@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
 from aethon.auth import current_owner, security
+from aethon.execution_safety_gate import ExecutionAuthorizationError, SafetyExecutionGate
 from aethon.schemas import TaskCreate, Task, ToolRequest
 from aethon.store import TaskStore
 from aethon.tools import ToolRegistry
@@ -30,6 +31,7 @@ app = FastAPI(title='AETHON API', version='0.1.0')
 store = build_task_store()
 tools = ToolRegistry()
 safety = SafetyKernel()
+safety_gate = SafetyExecutionGate(safety)
 model_router = ModelRouter()
 
 
@@ -65,8 +67,12 @@ def list_tools(): return tools.list()
 def execute_tool(request: ToolRequest):
     spec = next((x for x in tools.list() if x.name == request.tool), None)
     if not spec: raise HTTPException(404, 'tool not found')
-    decision = safety.authorize(spec.risk, spec.side_effects)
-    if decision != 'ALLOW': raise HTTPException(403, f'action {decision.lower()}')
+    try:
+        authorization = safety_gate.authorize(spec.risk, spec.side_effects)
+    except ExecutionAuthorizationError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    if authorization.effective_decision != 'ALLOW':
+        raise HTTPException(403, 'execution blocked by safety policy')
     return tools.execute(request)
 
 @app.post('/v1/memory')
