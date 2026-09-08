@@ -84,3 +84,16 @@ class WorkerLeaseStore:
         if not row:
             return None
         return {"task_id": row[0], "worker_id": row[1], "lease_token": row[2], "acquired_at": row[3], "heartbeat_at": row[4], "expires_at": row[5], "expired": row[5] <= self._now()}
+
+    def close(self) -> None:
+        with self._lock:
+            conn = self._conn
+            self._conn = None
+            if conn is not None:
+                conn.close()
+
+    def __enter__(self) -> "WorkerLeaseStore":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()

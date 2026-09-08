@@ -29,6 +29,7 @@ class AgentStateStore:
         self.path = path
         self._memory: dict[str, AgentState] = {}
         self._memory_controls: dict[str, dict[str, bool]] = {}
+        self._conn = None
         try:
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             self._conn = sqlite3.connect(path, check_same_thread=False)
@@ -43,7 +44,7 @@ class AgentStateStore:
                 self._conn.execute("ALTER TABLE agent_controls ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
             self._conn.commit()
         except Exception:
-            self._conn = None
+            self.close()
 
     @staticmethod
     def _now() -> str:
@@ -133,3 +134,15 @@ class AgentStateStore:
             self._conn.execute("DELETE FROM agent_state WHERE task_id=?", (key,))
             self._conn.execute("DELETE FROM agent_controls WHERE task_id=?", (key,))
             self._conn.commit()
+
+    def close(self) -> None:
+        conn = self._conn
+        self._conn = None
+        if conn is not None:
+            conn.close()
+
+    def __enter__(self) -> "AgentStateStore":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()

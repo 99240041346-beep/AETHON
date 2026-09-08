@@ -18,6 +18,16 @@ from aethon.worker_lease import WorkerLeaseStore
 from aethon.worker_pool import LeasedWorkerPool
 
 
+class _ClosingSQLiteConnection(sqlite3.Connection):
+    """SQLite connection whose context manager also releases the OS handle."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class TaskStore:
     """Durable task/event store with bounded, lease-protected agent scheduling."""
 
@@ -44,7 +54,7 @@ class TaskStore:
         self._recover_tasks()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.database_path)
+        conn = sqlite3.connect(self.database_path, factory=_ClosingSQLiteConnection)
         conn.row_factory = sqlite3.Row
         return conn
 
