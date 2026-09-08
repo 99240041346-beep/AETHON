@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from threading import RLock
-from typing import Iterable
 
 from .memory_engine import redact_secrets
 
@@ -60,7 +59,7 @@ class AgentWorkingMemory:
         self.max_item_characters = max_item_characters
         self.max_characters = max_characters
         self.default_ttl_seconds = default_ttl_seconds
-        self._items: dict[tuple[str, str, str, str | None], WorkingMemoryItem] = {}
+        self._items: dict[tuple[str, str, str, str | None, str], WorkingMemoryItem] = {}
         self._lock = RLock()
 
     def _purge_expired(self, now: datetime | None = None) -> None:
@@ -105,8 +104,7 @@ class AgentWorkingMemory:
                         if (candidate.owner_id, candidate.task_id, candidate.namespace, candidate.project_id) == identity
                         and candidate.key == item.key]
             if existing:
-                old = existing[0]
-                item = WorkingMemoryItem(**{**item.__dict__, "created_at": old.created_at})
+                item = replace(item, created_at=existing[0].created_at)
             self._items[(owner_id, task_id, item.namespace, project_id, item.key)] = item
             self._enforce_limits(identity)
             return item
@@ -114,7 +112,6 @@ class AgentWorkingMemory:
     def _enforce_limits(self, scope: tuple[str, str, str, str | None]) -> None:
         candidates = [item for item in self._items.values()
                       if (item.owner_id, item.task_id, item.namespace, item.project_id) == scope]
-        # Lower priority and older updates are evicted first. This is deterministic.
         candidates.sort(key=lambda item: (item.priority, item.updated_at, item.key))
         while len(candidates) > self.max_items or sum(len(item.content) for item in candidates) > self.max_characters:
             victim = candidates.pop(0)
@@ -136,8 +133,6 @@ class AgentWorkingMemory:
             items = [item for item in self._items.values()
                      if item.task_id == task_id and item.owner_id == owner_id
                      and item.project_id == project_id and item.namespace == namespace.strip()]
-        items.sort(key=lambda item: (-item.priority, -item.updated_at.__hash__(), item.key))
-        # Use a stable secondary ordering without relying on hash randomization.
         items.sort(key=lambda item: (-item.priority, item.updated_at, item.key), reverse=True)
         return tuple(items[:limit])
 
@@ -153,7 +148,7 @@ class AgentWorkingMemory:
                 if item.checkpoint == name:
                     updated.append(item)
                     continue
-                replacement = WorkingMemoryItem(**{**item.__dict__, "checkpoint": name})
+                replacement = replace(item, checkpoint=name)
                 self._items[(item.owner_id, item.task_id, item.namespace, item.project_id, item.key)] = replacement
                 updated.append(replacement)
         return self.snapshot(task_id=task_id, owner_id=owner_id, project_id=project_id, namespace=namespace)
