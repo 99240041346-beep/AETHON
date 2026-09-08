@@ -295,6 +295,7 @@ class AgentRuntime:
             raise ApprovalLifecycleError("approval missing or mismatched")
         if not self.approvals.pending(str(task.task_id), step_id):
             self.approvals.request(ApprovalRequest(str(task.task_id), step_id, matching["tool"], matching["risk"], bool(matching["side_effects"])))
+            self.approvals.approve(str(task.task_id), step_id, str(matching.get("approver", "restored-approver")))
         self.approvals.consume(str(task.task_id), step_id, tool_name)
         approvals = [item for item in saved.approvals if item is not matching]
         self.state_store.save(AgentState(task_id=saved.task_id, plan=saved.plan, observations=saved.observations, approvals=approvals, recovery_history=saved.recovery_history, last_verified_step=saved.last_verified_step, status=saved.status))
