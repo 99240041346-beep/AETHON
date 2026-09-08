@@ -45,9 +45,12 @@ class ReflectionQualityEngine:
         efficiency = max(0, 100 - max(0, len(completed) - len(expected)) * 10)
         score = round((completeness * 0.5) + (reliability * 0.3) + (efficiency * 0.2))
         issues = []
-        if completeness < 100: issues.append("incomplete_plan")
-        if failed: issues.append("execution_failures")
-        if score < self.min_score: issues.append("below_quality_threshold")
+        if completeness < 100:
+            issues.append("incomplete_plan")
+        if failed:
+            issues.append("execution_failures")
+        if score < self.min_score:
+            issues.append("below_quality_threshold")
         return PlanQuality(score, completeness, reliability, efficiency, tuple(issues))
 
     def reflect(self, reflection: Reflection) -> tuple[str, ...]:
@@ -59,4 +62,5 @@ class ReflectionQualityEngine:
     def should_replan(self, quality: PlanQuality) -> bool:
         return quality.score < self.min_score or bool(quality.issues)
 
-__all__ = ["Reflection", "ReflectionQuality", "ReflectionQualityError", "PlanQuality", "ReflectionQualityEngine"]
+
+__all__ = ["Reflection", "PlanQuality", "ReflectionQualityError", "ReflectionQualityEngine"]
