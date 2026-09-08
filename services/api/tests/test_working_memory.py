@@ -1,15 +1,21 @@
+from time import sleep
+
 from aethon.working_memory import AgentWorkingMemory, WorkingMemorySecurityError
 
 
-def test_working_memory_is_task_and_owner_scoped():
+def test_working_memory_is_task_owner_project_and_namespace_scoped():
     memory = AgentWorkingMemory()
     memory.put("plan", "step one", task_id="task-a", owner_id="owner-a", project_id="alpha")
+    memory.put("project", "other project", task_id="task-a", owner_id="owner-a", project_id="beta")
+    memory.put("namespace", "other namespace", task_id="task-a", owner_id="owner-a", project_id="alpha", namespace="other")
     memory.put("secret", "other task", task_id="task-b", owner_id="owner-a", project_id="alpha")
     memory.put("foreign", "other owner", task_id="task-a", owner_id="owner-b", project_id="alpha")
 
     recalled = memory.recall(task_id="task-a", owner_id="owner-a", project_id="alpha")
     assert [item.key for item in recalled] == ["plan"]
     assert memory.get("secret", task_id="task-a", owner_id="owner-a", project_id="alpha") is None
+    assert memory.get("project", task_id="task-a", owner_id="owner-a", project_id="alpha") is None
+    assert memory.get("namespace", task_id="task-a", owner_id="owner-a", project_id="alpha") is None
 
 
 def test_working_memory_redacts_secrets_and_never_becomes_authority():
@@ -32,6 +38,14 @@ def test_working_memory_evicts_low_priority_items_with_deterministic_bounds():
     memory.put("medium", "c", task_id="t", owner_id="o", priority=50)
     assert memory.get("low", task_id="t", owner_id="o") is None
     assert {item.key for item in memory.recall(task_id="t", owner_id="o")} == {"high", "medium"}
+
+
+def test_working_memory_expires_items_on_access():
+    memory = AgentWorkingMemory(default_ttl_seconds=1)
+    memory.put("temporary", "value", task_id="t", owner_id="o", ttl_seconds=1)
+    assert memory.get("temporary", task_id="t", owner_id="o") is not None
+    sleep(1.05)
+    assert memory.get("temporary", task_id="t", owner_id="o") is None
 
 
 def test_working_memory_checkpoint_and_snapshot():
