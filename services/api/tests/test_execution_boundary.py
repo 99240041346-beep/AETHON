@@ -33,7 +33,7 @@ def test_http_tool_execution_fails_closed_when_gate_blocks(monkeypatch):
         def authorize(self, *args, **kwargs):
             raise ExecutionAuthorizationError("blocked by regression test")
 
-    import aethon.main as main_module
+    import app.main as main_module
     monkeypatch.setattr(main_module, "safety_gate", BlockingGate())
     response = TestClient(app).post(
         "/v1/tools/execute",
