@@ -1,3 +1,3 @@
-from app.execution_guard import CompletionResult, ExecutionGuard
+from aethon.execution_guard import ExecutionDecision, ExecutionGuard, ExecutionGuardError
 
-__all__ = ["CompletionResult", "ExecutionGuard"]
+__all__ = ["ExecutionDecision", "ExecutionGuard", "ExecutionGuardError"]
