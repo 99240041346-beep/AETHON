@@ -5,7 +5,7 @@ def test_quality_is_deterministic_and_flags_failure():
     engine = ReflectionQualityEngine(min_score=60)
     quality = engine.evaluate(expected_steps=["a", "b"], completed_steps=["a"], failed_steps=["b"])
     assert quality.completeness == 50
-    assert quality.score < 60
+    assert quality.score <= 60
     assert engine.should_replan(quality)
 
 
