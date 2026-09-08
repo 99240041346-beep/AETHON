@@ -5,6 +5,7 @@ from uuid import UUID
 from aethon.agent_brain import AgentBrain, BrainDecision, Plan, PlanStep, StepKind
 from aethon.agent_learning import AgentLearning
 from aethon.agent_state import AgentState, AgentStateStore
+from aethon.approval_lifecycle import ApprovalLifecycle, ApprovalLifecycleError, ApprovalRequest
 from aethon.experience_generalization import ExperienceEvidence, ExperienceGeneralizer
 from aethon.experience_retrieval import ExperienceCandidate, ExperienceRetriever
 from aethon.memory_repository import MemoryRepository
@@ -15,6 +16,10 @@ from aethon.strategy_selection import AdaptiveStrategySelector
 from aethon.tools import ToolRegistry
 from aethon.verification import BasicVerifier, Verifier
 from aethon.web_runtime import WebAwareVerifier
+
+
+class ApprovalRequired(Exception):
+    """Internal control-flow signal used to pause execution without replanning."""
 
 
 class AgentRuntime:
@@ -31,6 +36,7 @@ class AgentRuntime:
         self.brain = brain or AgentBrain()
         self.state_store = state_store or AgentStateStore()
         self.learning = learning or AgentLearning()
+        self.approvals = ApprovalLifecycle()
         self.experience_generalizer = ExperienceGeneralizer()
         self.experience_retriever = ExperienceRetriever()
         self.strategy_selector = AdaptiveStrategySelector()
@@ -52,6 +58,10 @@ class AgentRuntime:
             for step in plan.steps:
                 if step.status not in {"SUCCEEDED", "PENDING"}:
                     step.status = "PENDING"
+            if saved.status == "AWAITING_APPROVAL":
+                task.error = None
+                if any(item.get("status") == "APPROVED" for item in saved.approvals):
+                    self._transition(task, TaskStatus.EXECUTING)
         else:
             self._transition(task, TaskStatus.PLANNING)
             self._audit(task, "task_started", {"project_id": task.project_id, "owner_id": task.owner_id})
@@ -108,7 +118,7 @@ class AgentRuntime:
             self._checkpoint(task, plan, observations, "RUNNING")
             try:
                 if step.kind == StepKind.TOOL:
-                    output = self._execute_tool(task, step.tool, step.arguments)
+                    output = self._execute_tool(task, step.step_id, step.tool, step.arguments)
                     observations.append(output)
                     answer = output
                 elif step.kind == StepKind.REASON:
@@ -147,6 +157,13 @@ class AgentRuntime:
                 self._checkpoint(task, plan, observations, "RUNNING", last_verified_step=step.step_id if step.kind == StepKind.VERIFY else None)
                 if task.status == TaskStatus.VERIFYING:
                     self._transition(task, TaskStatus.EXECUTING)
+            except ApprovalRequired as exc:
+                task.status = TaskStatus.AWAITING_APPROVAL
+                task.error = str(exc)
+                self._checkpoint(task, plan, observations, "AWAITING_APPROVAL", last_verified_step=self._last_verified(plan))
+                self._event(task, "task.awaiting_approval", {"reason": str(exc), "step_id": step.step_id, "tool": step.tool, "revision": plan.revision})
+                self._audit(task, "approval_required", {"step_id": step.step_id, "tool": step.tool, "revision": plan.revision})
+                return task
             except Exception as exc:
                 replanned = self._replan(task, plan, step, str(exc), observations)
                 if replanned.action == "BLOCK":
@@ -195,6 +212,27 @@ class AgentRuntime:
         self.state_store.clear_controls(task.task_id)
         return task
 
+    def approve(self, task_id: UUID | str, step_id: str, approver: str) -> Task:
+        """Record explicit approval for a paused task; execution resumes via run()."""
+        task_key = str(task_id)
+        saved = self.state_store.load(task_key)
+        if saved is None or saved.status != "AWAITING_APPROVAL":
+            raise ApprovalLifecycleError("task is not awaiting approval")
+        pending = next((item for item in saved.approvals if item.get("task_id") == task_key and item.get("step_id") == step_id and item.get("status") == "PENDING"), None)
+        if pending is None:
+            raise ApprovalLifecycleError("no pending approval for task step")
+        if not self.approvals.pending(task_key, step_id):
+            self.approvals.request(ApprovalRequest(task_key, step_id, pending["tool"], pending["risk"], bool(pending["side_effects"])))
+        approved = self.approvals.approve(task_key, step_id, approver)
+        for item in saved.approvals:
+            if item.get("task_id") == task_key and item.get("step_id") == step_id and item.get("status") == "PENDING":
+                item.update({"status": "APPROVED", "approver": approved.approver})
+        self.state_store.save(AgentState(task_id=saved.task_id, plan=saved.plan, observations=saved.observations, approvals=saved.approvals, recovery_history=saved.recovery_history, last_verified_step=saved.last_verified_step, status="AWAITING_APPROVAL"))
+        event_task = Task(task_id=UUID(task_key), goal=saved.plan.get("goal", ""), status=TaskStatus.AWAITING_APPROVAL)
+        self._event(event_task, "approval.granted", {"step_id": step_id, "tool": approved.tool, "approver": approved.approver})
+        self._audit(event_task, "approval_granted", {"step_id": step_id, "tool": approved.tool, "approver": approved.approver})
+        return event_task
+
     def _experience_context(self, task: Task, namespace: str) -> tuple[str, ...]:
         memories = self.memory.search(task.goal, owner_id=task.owner_id, project_id=task.project_id, namespace=namespace, limit=20)
         evidence = tuple(ExperienceEvidence(item.memory_id, item.content, item.confidence, item.source) for item in memories if item.source == "agent_learning")
@@ -212,20 +250,55 @@ class AgentRuntime:
         self._checkpoint(task, plan, observations, "RECOVERING")
         return decision
 
-    def _execute_tool(self, task: Task, tool_name: str | None, arguments: dict) -> object:
+    def _execute_tool(self, task: Task, step_id: str, tool_name: str | None, arguments: dict) -> object:
         if not tool_name: raise ValueError("tool step missing tool name")
         spec = next((item for item in self.tools.list() if item.name == tool_name), None)
         if not spec: raise ValueError(f"tool not found: {tool_name}")
+        approved = self._has_persisted_approval(task, step_id, tool_name)
         decision = self.safety.authorize(spec.risk, spec.side_effects)
-        self._event(task, "tool.authorization", {"tool": tool_name, "decision": decision, "risk": spec.risk.value, "side_effects": spec.side_effects})
+        self._event(task, "tool.authorization", {"tool": tool_name, "decision": decision, "risk": spec.risk.value, "side_effects": spec.side_effects, "step_id": step_id, "approved": approved})
         if decision == "DENY": raise PermissionError(f"tool denied by safety policy: {tool_name}")
-        if decision == "APPROVAL_REQUIRED":
-            task.status = TaskStatus.AWAITING_APPROVAL
-            raise PermissionError(f"approval required for tool: {tool_name}")
+        if decision == "APPROVAL_REQUIRED" and not approved:
+            self._request_approval(task, step_id, spec)
+            raise ApprovalRequired(f"approval required for tool: {tool_name}")
+        if decision == "APPROVAL_REQUIRED" and approved:
+            self._consume_persisted_approval(task, step_id, tool_name)
+            decision = "ALLOW"
+            self._event(task, "tool.authorization", {"tool": tool_name, "decision": decision, "risk": spec.risk.value, "side_effects": spec.side_effects, "step_id": step_id, "approved": True, "rechecked": True})
         result = self.tools.execute(ToolRequest(tool=tool_name, arguments=arguments))
         self._event(task, "tool.observed", {"tool": tool_name, "ok": result.ok, "output_type": type(result.output).__name__ if result.ok else None, "error": result.error if not result.ok else None})
         if not result.ok: raise RuntimeError(result.error or f"tool failed: {tool_name}")
         return result.output
+
+    def _request_approval(self, task: Task, step_id: str, spec) -> None:
+        request = ApprovalRequest(str(task.task_id), step_id, spec.name, spec.risk.value, spec.side_effects)
+        self.approvals.request(request)
+        saved = self.state_store.load(task.task_id)
+        approvals = list(saved.approvals) if saved else []
+        approvals = [item for item in approvals if not (item.get("task_id") == request.task_id and item.get("step_id") == request.step_id)]
+        approvals.append({"task_id": request.task_id, "step_id": request.step_id, "tool": request.tool, "risk": request.risk, "side_effects": request.side_effects, "status": "PENDING"})
+        if saved:
+            self.state_store.save(AgentState(task_id=saved.task_id, plan=saved.plan, observations=saved.observations, approvals=approvals, recovery_history=saved.recovery_history, last_verified_step=saved.last_verified_step, status="AWAITING_APPROVAL"))
+
+    def _has_persisted_approval(self, task: Task, step_id: str, tool_name: str) -> bool:
+        saved = self.state_store.load(task.task_id)
+        return bool(saved and next((item for item in saved.approvals if item.get("task_id") == str(task.task_id) and item.get("step_id") == step_id and item.get("status") == "APPROVED" and item.get("tool") == tool_name), None))
+
+    def _consume_persisted_approval(self, task: Task, step_id: str, tool_name: str) -> bool:
+        saved = self.state_store.load(task.task_id)
+        if not saved:
+            raise ApprovalLifecycleError("approval state unavailable")
+        match = next((item for item in saved.approvals if item.get("task_id") == str(task.task_id) and item.get("step_id") == step_id and item.get("status") == "APPROVED" and item.get("tool") == tool_name), None)
+        if match is None:
+            raise ApprovalLifecycleError("explicit approval does not authorize this tool step")
+        if not self.approvals.has_approval(task.task_id, step_id, tool_name):
+            self.approvals.request(ApprovalRequest(str(task.task_id), step_id, tool_name, match["risk"], bool(match["side_effects"])))
+            self.approvals.approve(task.task_id, step_id, match["approver"])
+        self.approvals.consume(task.task_id, step_id, tool_name)
+        saved.approvals = [item for item in saved.approvals if item is not match]
+        self.state_store.save(saved)
+        self._event(task, "approval.consumed", {"step_id": step_id, "tool": tool_name, "approver": match["approver"]})
+        return True
 
     @staticmethod
     def _reason_prompt(goal: str, context, observations: list[object], step: str, experience_context: tuple[str, ...] = ()) -> str:
@@ -257,7 +330,7 @@ class AgentRuntime:
     def _emit_plan(self, task: Task, plan: Plan, event_type: str) -> None:
         self._event(task, event_type, {"revision": plan.revision, "goal": plan.goal, "steps": [self._step_data(step) for step in plan.steps], "completed_steps": list(plan.completed_steps), "recovery_history": list(plan.recovery_history)})
 
-    def _emit_replan(self, task: Task, plan: Plan, decision: BrainDecision) -> None:
+    def _emit_replan(self, task, plan: Plan, decision: BrainDecision) -> None:
         self._transition(task, TaskStatus.REPLANNING)
         self._event(task, "plan.replanned", {"revision": plan.revision, "action": decision.action, "reason": decision.reason, "step_id": decision.step.step_id if decision.step else None, "steps": [self._step_data(step) for step in plan.steps], "completed_steps": list(plan.completed_steps), "recovery_history": list(plan.recovery_history)})
 
