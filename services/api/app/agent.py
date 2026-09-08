@@ -58,6 +58,10 @@ class AgentRuntime:
             for step in plan.steps:
                 if step.status not in {"SUCCEEDED", "PENDING"}:
                     step.status = "PENDING"
+            if saved.status == "AWAITING_APPROVAL":
+                task.error = None
+                if any(item.get("status") == "APPROVED" for item in saved.approvals):
+                    self._transition(task, TaskStatus.EXECUTING)
         else:
             self._transition(task, TaskStatus.PLANNING)
             self._audit(task, "task_started", {"project_id": task.project_id, "owner_id": task.owner_id})
@@ -217,16 +221,17 @@ class AgentRuntime:
         pending = next((item for item in saved.approvals if item.get("task_id") == task_key and item.get("step_id") == step_id and item.get("status") == "PENDING"), None)
         if pending is None:
             raise ApprovalLifecycleError("no pending approval for task step")
-        record = self.approvals.request(ApprovalRequest(task_key, step_id, pending["tool"], pending["risk"], bool(pending["side_effects"]))) if not self.approvals.pending(task_key, step_id) else self.approvals.pending(task_key, step_id)
-        if record is None:
-            raise ApprovalLifecycleError("approval request unavailable")
+        if not self.approvals.pending(task_key, step_id):
+            self.approvals.request(ApprovalRequest(task_key, step_id, pending["tool"], pending["risk"], bool(pending["side_effects"])))
         approved = self.approvals.approve(task_key, step_id, approver)
         for item in saved.approvals:
             if item.get("task_id") == task_key and item.get("step_id") == step_id and item.get("status") == "PENDING":
                 item.update({"status": "APPROVED", "approver": approved.approver})
         self.state_store.save(AgentState(task_id=saved.task_id, plan=saved.plan, observations=saved.observations, approvals=saved.approvals, recovery_history=saved.recovery_history, last_verified_step=saved.last_verified_step, status="AWAITING_APPROVAL"))
-        self._event(Task(task_id=UUID(task_key), goal=saved.plan.get("goal", "")), "approval.granted", {"step_id": step_id, "tool": approved.tool, "approver": approved.approver})
-        return Task(task_id=UUID(task_key), goal=saved.plan.get("goal", ""), status=TaskStatus.AWAITING_APPROVAL)
+        event_task = Task(task_id=UUID(task_key), goal=saved.plan.get("goal", ""), status=TaskStatus.AWAITING_APPROVAL)
+        self._event(event_task, "approval.granted", {"step_id": step_id, "tool": approved.tool, "approver": approved.approver})
+        self._audit(event_task, "approval_granted", {"step_id": step_id, "tool": approved.tool, "approver": approved.approver})
+        return event_task
 
     def _experience_context(self, task: Task, namespace: str) -> tuple[str, ...]:
         memories = self.memory.search(task.goal, owner_id=task.owner_id, project_id=task.project_id, namespace=namespace, limit=20)
@@ -249,20 +254,17 @@ class AgentRuntime:
         if not tool_name: raise ValueError("tool step missing tool name")
         spec = next((item for item in self.tools.list() if item.name == tool_name), None)
         if not spec: raise ValueError(f"tool not found: {tool_name}")
+        approved = self._has_persisted_approval(task, step_id, tool_name)
         decision = self.safety.authorize(spec.risk, spec.side_effects)
-        self._event(task, "tool.authorization", {"tool": tool_name, "decision": decision, "risk": spec.risk.value, "side_effects": spec.side_effects, "step_id": step_id})
+        self._event(task, "tool.authorization", {"tool": tool_name, "decision": decision, "risk": spec.risk.value, "side_effects": spec.side_effects, "step_id": step_id, "approved": approved})
         if decision == "DENY": raise PermissionError(f"tool denied by safety policy: {tool_name}")
-        if decision == "APPROVAL_REQUIRED":
-            if self._consume_persisted_approval(task, step_id, tool_name):
-                decision = self.safety.authorize(spec.risk, spec.side_effects)
-                if decision != "APPROVAL_REQUIRED":
-                    result = self.tools.execute(ToolRequest(tool=tool_name, arguments=arguments))
-                    self._event(task, "tool.authorization", {"tool": tool_name, "decision": decision, "risk": spec.risk.value, "side_effects": spec.side_effects, "step_id": step_id, "approved": True})
-                    if not result.ok: raise RuntimeError(result.error or f"tool failed: {tool_name}")
-                    self._event(task, "tool.observed", {"tool": tool_name, "ok": result.ok, "output_type": type(result.output).__name__ if result.ok else None, "error": result.error if not result.ok else None})
-                    return result.output
+        if decision == "APPROVAL_REQUIRED" and not approved:
             self._request_approval(task, step_id, spec)
             raise ApprovalRequired(f"approval required for tool: {tool_name}")
+        if decision == "APPROVAL_REQUIRED" and approved:
+            self._consume_persisted_approval(task, step_id, tool_name)
+            decision = "ALLOW"
+            self._event(task, "tool.authorization", {"tool": tool_name, "decision": decision, "risk": spec.risk.value, "side_effects": spec.side_effects, "step_id": step_id, "approved": True, "rechecked": True})
         result = self.tools.execute(ToolRequest(tool=tool_name, arguments=arguments))
         self._event(task, "tool.observed", {"tool": tool_name, "ok": result.ok, "output_type": type(result.output).__name__ if result.ok else None, "error": result.error if not result.ok else None})
         if not result.ok: raise RuntimeError(result.error or f"tool failed: {tool_name}")
@@ -278,13 +280,17 @@ class AgentRuntime:
         if saved:
             self.state_store.save(AgentState(task_id=saved.task_id, plan=saved.plan, observations=saved.observations, approvals=approvals, recovery_history=saved.recovery_history, last_verified_step=saved.last_verified_step, status="AWAITING_APPROVAL"))
 
+    def _has_persisted_approval(self, task: Task, step_id: str, tool_name: str) -> bool:
+        saved = self.state_store.load(task.task_id)
+        return bool(saved and next((item for item in saved.approvals if item.get("task_id") == str(task.task_id) and item.get("step_id") == step_id and item.get("status") == "APPROVED" and item.get("tool") == tool_name), None))
+
     def _consume_persisted_approval(self, task: Task, step_id: str, tool_name: str) -> bool:
         saved = self.state_store.load(task.task_id)
         if not saved:
-            return False
+            raise ApprovalLifecycleError("approval state unavailable")
         match = next((item for item in saved.approvals if item.get("task_id") == str(task.task_id) and item.get("step_id") == step_id and item.get("status") == "APPROVED" and item.get("tool") == tool_name), None)
         if match is None:
-            return False
+            raise ApprovalLifecycleError("explicit approval does not authorize this tool step")
         if not self.approvals.has_approval(task.task_id, step_id, tool_name):
             self.approvals.request(ApprovalRequest(str(task.task_id), step_id, tool_name, match["risk"], bool(match["side_effects"])))
             self.approvals.approve(task.task_id, step_id, match["approver"])
@@ -324,7 +330,7 @@ class AgentRuntime:
     def _emit_plan(self, task: Task, plan: Plan, event_type: str) -> None:
         self._event(task, event_type, {"revision": plan.revision, "goal": plan.goal, "steps": [self._step_data(step) for step in plan.steps], "completed_steps": list(plan.completed_steps), "recovery_history": list(plan.recovery_history)})
 
-    def _emit_replan(self, task: Task, plan: Plan, decision: BrainDecision) -> None:
+    def _emit_replan(self, task, plan: Plan, decision: BrainDecision) -> None:
         self._transition(task, TaskStatus.REPLANNING)
         self._event(task, "plan.replanned", {"revision": plan.revision, "action": decision.action, "reason": decision.reason, "step_id": decision.step.step_id if decision.step else None, "steps": [self._step_data(step) for step in plan.steps], "completed_steps": list(plan.completed_steps), "recovery_history": list(plan.recovery_history)})
 
