@@ -1,0 +1,1 @@
+Phase 21 implementation is provided as a bounded adapter contract with repository path validation, operation budgets, approval gates, deterministic failure stopping, and tests. Provider-specific execution remains isolated and must be verified before production claims.
