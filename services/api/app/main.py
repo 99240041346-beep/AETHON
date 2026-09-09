@@ -15,6 +15,8 @@ from aethon.model_router import ModelRouter
 from aethon.memory_api import MemoryWriteRequest, MemorySearchRequest, MemoryDeleteRequest, MemoryMaintenanceRequest, write_memory, search_memory, delete_memory, plan_memory_maintenance
 from aethon.memory_engine import MemorySecurityError
 from aethon.migrations import migrate_from_environment
+from aethon.voice_api import router as voice_router
+from aethon.device_gateway_api import router as device_router
 
 
 def build_task_store():
@@ -33,6 +35,8 @@ tools = ToolRegistry()
 safety = SafetyKernel()
 safety_gate = SafetyExecutionGate(safety)
 model_router = ModelRouter()
+app.include_router(voice_router)
+app.include_router(device_router)
 
 
 def owner(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> str:
