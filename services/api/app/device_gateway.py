@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import secrets
 import time
 from dataclasses import dataclass
@@ -58,7 +57,6 @@ class CommandEnvelope:
 
 class DeviceGateway:
     """Bounded device policy boundary; it authenticates and authorizes but never drives hardware."""
-
     MAX_DEVICES = 1000
     MAX_PAYLOAD_BYTES = 8192
     MAX_TTL_SECONDS = 120
@@ -76,11 +74,12 @@ class DeviceGateway:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     def register(self, *, owner_id: str, device_id: str, platform: str, capabilities: set[str]) -> dict[str, str]:
+        allowed = {x.value for x in Capability}
         if not owner_id or not device_id or not platform:
             raise GatewayError("owner, device and platform are required")
-        if len(device_id) > 128 or len(platform) > 40:
-            raise GatewayError("device identity is too long")
-        if len(capabilities) > 32 or any(cap not in {x.value for x in Capability} for cap in capabilities):
+        if len(device_id) > 128 or len(platform) > 40 or len(capabilities) > 32:
+            raise GatewayError("device identity or capability set is too large")
+        if any(cap not in allowed for cap in capabilities):
             raise GatewayError("undeclared device capability")
         if len(self._devices) >= self.MAX_DEVICES and device_id not in self._devices:
             raise GatewayError("device capacity reached")
@@ -119,6 +118,14 @@ class DeviceGateway:
         risk = RiskClass.LOW if envelope.capability.endswith("_READ") or envelope.capability == Capability.APP_OPEN.value else RiskClass.MEDIUM
         try:
             decision = self.safety.authorize(risk, side_effects=risk != RiskClass.LOW, approved=envelope.approved)
+        except TypeError:
+            try:
+                decision = self.safety.authorize(risk, side_effects=risk != RiskClass.LOW)
+            except ExecutionAuthorizationError as exc:
+                self._audit("device.command.blocked", envelope.device_id, owner_id, {"command_id": envelope.command_id, "reason": str(exc)})
+                raise GatewayError(str(exc)) from exc
+            if risk != RiskClass.LOW and not envelope.approved:
+                raise GatewayError("explicit execution approval required")
         except ExecutionAuthorizationError as exc:
             self._audit("device.command.blocked", envelope.device_id, owner_id, {"command_id": envelope.command_id, "reason": str(exc)})
             raise GatewayError(str(exc)) from exc
