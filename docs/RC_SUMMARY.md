@@ -1,0 +1,1 @@
+Integrated release candidate for AETHON gates 11–16: Telugu voice input/output, voice conversation API with model routing and deterministic fallback, Android conversation round trip, authenticated owner-scoped device gateway, bounded capabilities, replay/expiry/TTL/payload controls, approval gating, audit events, and automated verification contracts.
