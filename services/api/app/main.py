@@ -79,11 +79,6 @@ def execute_tool(request: ToolRequest):
         raise HTTPException(403, 'execution blocked by safety policy')
     return tools.execute(request)
 
-@app.include_router(voice_router)
-@app.include_router(device_router)
-def _routers():
-    pass
-
 @app.post('/v1/memory')
 def create_memory(request: MemoryWriteRequest, owner_id: str = Depends(owner)):
     try: return write_memory(request, owner_id=owner_id)
