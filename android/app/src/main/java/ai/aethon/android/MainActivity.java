@@ -1,10 +1,17 @@
 package ai.aethon.android;
 
+import android.Manifest;
 import android.app.Activity;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.EditText;
@@ -16,16 +23,33 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.Locale;
 
-public final class MainActivity extends Activity {
+public final class MainActivity extends Activity implements TextToSpeech.OnInitListener {
+    private static final int REQUEST_RECORD_AUDIO = 7001;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TextView status;
     private EditText apiUrl;
+    private EditText transcript;
+    private SpeechRecognizer speechRecognizer;
+    private TextToSpeech textToSpeech;
+    private boolean ttsReady;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        textToSpeech = new TextToSpeech(this, this);
+        buildUi();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_RECORD_AUDIO);
+        } else {
+            initSpeechRecognizer();
+        }
+    }
 
+    private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(32, 48, 32, 32);
@@ -38,7 +62,7 @@ public final class MainActivity extends Activity {
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Think. Create. Act.\nAndroid Device Client");
+        subtitle.setText("Think. Create. Act.\nTelugu Voice Interface");
         subtitle.setTextSize(16);
         subtitle.setGravity(Gravity.CENTER);
         root.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
@@ -54,6 +78,22 @@ public final class MainActivity extends Activity {
         health.setOnClickListener(v -> checkHealth());
         root.addView(health, new LinearLayout.LayoutParams(-1, -2));
 
+        Button listen = new Button(this);
+        listen.setText("🎙  మాట్లాడండి / Speak to AETHON");
+        listen.setOnClickListener(v -> startListening());
+        root.addView(listen, new LinearLayout.LayoutParams(-1, -2));
+
+        transcript = new EditText(this);
+        transcript.setHint("మీ మాట / Your speech");
+        transcript.setMinLines(3);
+        transcript.setGravity(Gravity.TOP | Gravity.START);
+        root.addView(transcript, new LinearLayout.LayoutParams(-1, -2));
+
+        Button speak = new Button(this);
+        speak.setText("🔊 AETHON Voice");
+        speak.setOnClickListener(v -> speakText(transcript.getText().toString().trim()));
+        root.addView(speak, new LinearLayout.LayoutParams(-1, -2));
+
         TextView device = new TextView(this);
         device.setText(deviceInfo());
         device.setTextSize(15);
@@ -61,7 +101,7 @@ public final class MainActivity extends Activity {
         root.addView(device, new LinearLayout.LayoutParams(-1, -2));
 
         status = new TextView(this);
-        status.setText("Status: ready\nNo privileged device capability is enabled.");
+        status.setText("Status: ready\nTelugu speech input/output is initializing…");
         status.setTextSize(15);
         root.addView(status, new LinearLayout.LayoutParams(-1, -2));
 
@@ -75,6 +115,88 @@ public final class MainActivity extends Activity {
                 + "Manufacturer: " + Build.MANUFACTURER + "\n"
                 + "Model: " + Build.MODEL + "\n"
                 + "Android: " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")";
+    }
+
+    private void initSpeechRecognizer() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            status.setText("Status: speech recognition unavailable on this device");
+            return;
+        }
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        speechRecognizer.setRecognitionListener(new RecognitionListener() {
+            @Override public void onReadyForSpeech(Bundle params) {
+                status.setText("Status: listening… Telugu speech is active");
+            }
+            @Override public void onBeginningOfSpeech() { }
+            @Override public void onRmsChanged(float rmsdB) { }
+            @Override public void onBufferReceived(byte[] buffer) { }
+            @Override public void onEndOfSpeech() {
+                status.setText("Status: processing speech…");
+            }
+            @Override public void onError(int error) {
+                status.setText("Status: speech error " + error + " — tap Speak again");
+            }
+            @Override public void onResults(Bundle results) {
+                ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                if (matches != null && !matches.isEmpty()) {
+                    String text = matches.get(0);
+                    transcript.setText(text);
+                    transcript.setSelection(transcript.length());
+                    status.setText("Status: heard your Telugu request");
+                } else {
+                    status.setText("Status: no speech recognized");
+                }
+            }
+            @Override public void onPartialResults(Bundle partialResults) { }
+            @Override public void onEvent(int eventType, Bundle params) { }
+        });
+    }
+
+    private void startListening() {
+        if (speechRecognizer == null) {
+            initSpeechRecognizer();
+        }
+        if (speechRecognizer == null) return;
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "te-IN");
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "te-IN");
+        intent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, "te-IN");
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
+        intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "AETHON వినుతోంది…");
+        speechRecognizer.startListening(intent);
+    }
+
+    @Override
+    public void onInit(int statusCode) {
+        if (statusCode != TextToSpeech.SUCCESS) {
+            status.setText("Status: AETHON voice engine unavailable");
+            return;
+        }
+        int result = textToSpeech.setLanguage(new Locale("te", "IN"));
+        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+            result = textToSpeech.setLanguage(Locale.ENGLISH);
+            ttsReady = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED;
+            status.setText(ttsReady
+                    ? "Status: voice ready (English fallback; install Telugu voice data for Telugu)"
+                    : "Status: no supported TTS voice installed");
+        } else {
+            ttsReady = true;
+            textToSpeech.setSpeechRate(0.88f);
+            textToSpeech.setPitch(0.82f);
+            status.setText("Status: AETHON Telugu voice ready");
+        }
+    }
+
+    private void speakText(String text) {
+        if (!ttsReady) {
+            status.setText("Status: voice engine is not ready yet");
+            return;
+        }
+        if (text.isEmpty()) {
+            text = "నమస్కారం. నేను AETHON. మీకు ఎలా సహాయం చేయాలి?";
+        }
+        textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null, "aethon-response");
+        status.setText("Status: AETHON is speaking…");
     }
 
     private void checkHealth() {
@@ -101,5 +223,32 @@ public final class MainActivity extends Activity {
                 if (connection != null) connection.disconnect();
             }
         }).start();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_RECORD_AUDIO) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                initSpeechRecognizer();
+                status.setText("Status: microphone permission granted; voice ready");
+            } else {
+                status.setText("Status: microphone permission denied; voice input disabled");
+            }
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+            speechRecognizer = null;
+        }
+        if (textToSpeech != null) {
+            textToSpeech.stop();
+            textToSpeech.shutdown();
+            textToSpeech = null;
+        }
+        super.onDestroy();
     }
 }
