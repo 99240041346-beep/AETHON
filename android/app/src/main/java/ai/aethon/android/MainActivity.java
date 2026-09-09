@@ -39,8 +39,8 @@ public final class MainActivity extends Activity implements TextToSpeech.OnInitL
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        textToSpeech = new TextToSpeech(this, this);
         buildUi();
+        textToSpeech = new TextToSpeech(this, this);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_RECORD_AUDIO);
@@ -130,9 +130,7 @@ public final class MainActivity extends Activity implements TextToSpeech.OnInitL
             @Override public void onBeginningOfSpeech() { }
             @Override public void onRmsChanged(float rmsdB) { }
             @Override public void onBufferReceived(byte[] buffer) { }
-            @Override public void onEndOfSpeech() {
-                status.setText("Status: processing speech…");
-            }
+            @Override public void onEndOfSpeech() { status.setText("Status: processing speech…"); }
             @Override public void onError(int error) {
                 status.setText("Status: speech error " + error + " — tap Speak again");
             }
@@ -153,14 +151,11 @@ public final class MainActivity extends Activity implements TextToSpeech.OnInitL
     }
 
     private void startListening() {
-        if (speechRecognizer == null) {
-            initSpeechRecognizer();
-        }
+        if (speechRecognizer == null) initSpeechRecognizer();
         if (speechRecognizer == null) return;
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "te-IN");
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "te-IN");
-        intent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, "te-IN");
         intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
         intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "AETHON వినుతోంది…");
         speechRecognizer.startListening(intent);
