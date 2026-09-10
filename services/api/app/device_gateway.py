@@ -32,8 +32,9 @@ class Capability(str, Enum):
     FLASHLIGHT_ON = "FLASHLIGHT_ON"
     FLASHLIGHT_OFF = "FLASHLIGHT_OFF"
     SCREEN_CAPTURE = "SCREEN_CAPTURE"
-    # Legacy name retained for compatibility with the older gateway API.
+    # Legacy names retained for compatibility with the older gateway API.
     APP_OPEN = "APP_OPEN"
+    SCREEN_INTERACT = "SCREEN_INTERACT"
     CAMERA_READ = "CAMERA_READ"
     MICROPHONE_READ = "MICROPHONE_READ"
     LOCATION_READ = "LOCATION_READ"
@@ -110,7 +111,6 @@ class DeviceGateway:
         return device
 
     def authenticate_any_owner(self, *, device_id: str, token: str) -> Device:
-        """Authenticate a device token and derive owner scope from the authenticated record."""
         device = self._devices.get(device_id)
         if not device or not hmac.compare_digest(device.token_hash, self._hash(token)):
             self._audit("device.auth.failed", device_id, "unknown", {})
