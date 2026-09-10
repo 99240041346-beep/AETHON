@@ -104,7 +104,7 @@ class DeviceGateway:
             raise GatewayError("undeclared device capability")
         if self.registry:
             try:
-                if self.registry.get(device_id):
+                if self.registry.get(device_id=device_id):
                     raise GatewayError("device already registered")
                 token = secrets.token_urlsafe(32)
                 nonce = secrets.token_urlsafe(16)
@@ -165,14 +165,6 @@ class DeviceGateway:
     def authorize_command(self, envelope: CommandEnvelope, *, owner_id: str, token: str) -> dict[str, Any]:
         device = self.authenticate(device_id=envelope.device_id, token=token, owner_id=owner_id)
         now = time.time()
-        if self.registry:
-            try:
-                if not self.registry.mark_replay_nonce(nonce=envelope.nonce, device_id=envelope.device_id, command_id=envelope.command_id):
-                    raise GatewayError("replayed command envelope")
-            except DeviceRegistryError as exc:
-                raise GatewayError(str(exc)) from exc
-        elif envelope.command_id in self._used_commands or envelope.nonce in self._used_nonces:
-            raise GatewayError("replayed command envelope")
         if envelope.expires_at <= now or envelope.issued_at > now + 10:
             raise GatewayError("expired or future-dated command envelope")
         if envelope.expires_at - envelope.issued_at > self.MAX_TTL_SECONDS:
@@ -195,6 +187,14 @@ class DeviceGateway:
         except ExecutionAuthorizationError as exc:
             self._audit("device.command.blocked", envelope.device_id, owner_id, {"command_id": envelope.command_id, "reason": str(exc)})
             raise GatewayError(str(exc)) from exc
+        if self.registry:
+            try:
+                if not self.registry.mark_replay_nonce(nonce=envelope.nonce, device_id=envelope.device_id, command_id=envelope.command_id):
+                    raise GatewayError("replayed command envelope")
+            except DeviceRegistryError as exc:
+                raise GatewayError(str(exc)) from exc
+        elif envelope.command_id in self._used_commands or envelope.nonce in self._used_nonces:
+            raise GatewayError("replayed command envelope")
         if not self.registry:
             self._used_commands.add(envelope.command_id)
             self._used_nonces.add(envelope.nonce)
