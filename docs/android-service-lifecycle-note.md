@@ -1,0 +1,1 @@
+Foreground service lifecycle is user-started from the device-link UI and explicitly stopped by Disconnect. Physical-device E2E remains a runtime verification gate.
