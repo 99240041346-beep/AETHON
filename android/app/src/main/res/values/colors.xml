@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="aethon_background">#070B14</color>
+    <color name="aethon_surface">#182030</color>
+    <color name="aethon_text">#F8FAFC</color>
+    <color name="aethon_muted">#94A3B8</color>
+</resources>
