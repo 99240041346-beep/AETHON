@@ -64,3 +64,50 @@ class AssistantRepository:
              "created_at": r[8].isoformat() if hasattr(r[8], "isoformat") else str(r[8])}
             for r in reversed(rows)
         ]
+
+    def sessions(self, owner_id: str, limit: int = 50) -> list[dict]:
+        if not self.enabled:
+            return []
+        limit = max(1, min(limit, 100))
+        with psycopg.connect(self.database_url) as conn:
+            rows = conn.execute(
+                """SELECT session_id, project_id, title, language, created_at, updated_at
+                FROM assistant_sessions WHERE owner_id=%s
+                ORDER BY updated_at DESC LIMIT %s""",
+                (owner_id, limit),
+            ).fetchall()
+        return [
+            {"session_id": str(r[0]), "project_id": r[1], "title": r[2], "language": r[3],
+             "created_at": r[4].isoformat() if hasattr(r[4], "isoformat") else str(r[4]),
+             "updated_at": r[5].isoformat() if hasattr(r[5], "isoformat") else str(r[5])}
+            for r in rows
+        ]
+
+    def session(self, session_id: str, owner_id: str) -> dict | None:
+        if not self.enabled:
+            return None
+        with psycopg.connect(self.database_url) as conn:
+            row = conn.execute(
+                """SELECT session_id, project_id, title, language, created_at, updated_at
+                FROM assistant_sessions WHERE session_id=%s AND owner_id=%s""",
+                (UUID(session_id), owner_id),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "session_id": str(row[0]), "project_id": row[1], "title": row[2], "language": row[3],
+            "created_at": row[4].isoformat() if hasattr(row[4], "isoformat") else str(row[4]),
+            "updated_at": row[5].isoformat() if hasattr(row[5], "isoformat") else str(row[5]),
+        }
+
+    def archive_session(self, session_id: str, owner_id: str) -> bool:
+        if not self.enabled:
+            return False
+        with psycopg.connect(self.database_url) as conn:
+            result = conn.execute(
+                """UPDATE assistant_sessions SET title=COALESCE(title, 'Archived'), updated_at=NOW()
+                WHERE session_id=%s AND owner_id=%s""",
+                (UUID(session_id), owner_id),
+            )
+            conn.commit()
+        return result.rowcount == 1
