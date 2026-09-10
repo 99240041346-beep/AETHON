@@ -17,6 +17,7 @@ from aethon.memory_engine import MemorySecurityError
 from aethon.migrations import migrate_from_environment
 from aethon.voice_api import router as voice_router
 from aethon.device_gateway_api import router as device_router
+from aethon.assistant_api import router as assistant_router
 
 
 def build_task_store():
@@ -37,6 +38,7 @@ safety_gate = SafetyExecutionGate(safety)
 model_router = ModelRouter()
 app.include_router(voice_router)
 app.include_router(device_router)
+app.include_router(assistant_router)
 
 
 def owner(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> str:
@@ -81,7 +83,7 @@ def execute_tool(request: ToolRequest):
 
 @app.post('/v1/memory')
 def create_memory(request: MemoryWriteRequest, owner_id: str = Depends(owner)):
-    try: return write_memory(request, owner_id=owner_id)
+    try: return write_memory(request, owner_id=owner)
     except MemorySecurityError as exc: raise HTTPException(400, str(exc)) from exc
 
 @app.post('/v1/memory/search')
