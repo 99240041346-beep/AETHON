@@ -5,6 +5,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from aethon.assistant_command_bridge import AssistantCommandBridge
 from aethon.auth import current_owner, security
 from aethon.execution_safety_gate import ExecutionAuthorizationError, SafetyExecutionGate
 from aethon.model_router import ModelRouter
@@ -14,6 +15,7 @@ from aethon.security import SafetyKernel
 router = APIRouter(prefix="/v1/voice", tags=["voice"])
 model_router = ModelRouter()
 safety_gate = SafetyExecutionGate(SafetyKernel())
+command_bridge = AssistantCommandBridge()
 
 
 class VoiceRequest(BaseModel):
@@ -30,6 +32,8 @@ class VoiceResponse(BaseModel):
     response: str
     provider: str
     action_authorized: bool = False
+    action: str | None = None
+    action_arguments: dict[str, str] = Field(default_factory=dict)
 
 
 def owner(credentials=Depends(security)) -> str:
@@ -51,6 +55,12 @@ def _deterministic_fallback(request: VoiceRequest) -> str:
     return f"I heard you: {request.transcript}"
 
 
+def _action_reply(request: VoiceRequest, app: str) -> str:
+    if request.language.lower().startswith("te"):
+        return f"సరే Harsha, {app} ఓపెన్ చేస్తున్నాను."
+    return f"Okay Harsha, opening {app}."
+
+
 @router.post("/respond", response_model=VoiceResponse)
 def respond(request: VoiceRequest, owner_id: str = Depends(owner)) -> VoiceResponse:
     try:
@@ -59,6 +69,20 @@ def respond(request: VoiceRequest, owner_id: str = Depends(owner)) -> VoiceRespo
         raise HTTPException(403, "voice request blocked by safety policy") from exc
 
     session_id = request.session_id or str(uuid4())
+    intent = command_bridge.classify(request.transcript, language=request.language)
+    if intent is not None and intent.action == "android.open_app":
+        return VoiceResponse(
+            ok=True,
+            session_id=session_id,
+            language=request.language,
+            transcript=request.transcript,
+            response=_action_reply(request, intent.arguments["app"]),
+            provider="command-bridge",
+            action_authorized=True,
+            action=intent.action,
+            action_arguments={k: str(v) for k, v in intent.arguments.items()},
+        )
+
     prompt = (
         "You are AETHON, a bounded personal AI assistant. "
         f"Owner: {owner_id}. Session: {session_id}. "
@@ -69,8 +93,6 @@ def respond(request: VoiceRequest, owner_id: str = Depends(owner)) -> VoiceRespo
 
     try:
         provider_name = model_router.provider.name
-        # The built-in deterministic provider is a development fallback, not a
-        # conversational model. Never expose its prompt echo to the user.
         if provider_name == "deterministic":
             response = _deterministic_fallback(request)
             provider = "deterministic-fallback"
