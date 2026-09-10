@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.media.AudioManager;
 import android.os.BatteryManager;
@@ -14,9 +15,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Executes only explicitly allowlisted, bounded Android actions and verifies the
- * observable result. No shell, root, accessibility injection, or arbitrary Intent
- * execution is exposed here.
+ * Executes only explicitly allowlisted, bounded Android actions and reports whether
+ * the observable result was actually verified. No shell, root, accessibility
+ * injection, or arbitrary Intent execution is exposed here.
  */
 public final class AndroidActionExecutor {
     public static final class Result {
@@ -41,6 +42,10 @@ public final class AndroidActionExecutor {
 
         static Result success(String capability, String message, Map<String, Object> data) {
             return new Result(true, true, capability, message, data);
+        }
+
+        static Result acceptedUnverified(String capability, String message, Map<String, Object> data) {
+            return new Result(true, false, capability, message, data);
         }
     }
 
@@ -69,11 +74,11 @@ public final class AndroidActionExecutor {
             case AndroidCapabilityRegistry.FLASHLIGHT_OFF:
                 return flashlight(false);
             case AndroidCapabilityRegistry.MEDIA_PLAY:
-                return mediaKey(android.view.KeyEvent.KEYCODE_MEDIA_PLAY);
+                return mediaKey(AndroidCapabilityRegistry.MEDIA_PLAY, android.view.KeyEvent.KEYCODE_MEDIA_PLAY);
             case AndroidCapabilityRegistry.MEDIA_PAUSE:
-                return mediaKey(android.view.KeyEvent.KEYCODE_MEDIA_PAUSE);
+                return mediaKey(AndroidCapabilityRegistry.MEDIA_PAUSE, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE);
             case AndroidCapabilityRegistry.MEDIA_STOP:
-                return mediaKey(android.view.KeyEvent.KEYCODE_MEDIA_STOP);
+                return mediaKey(AndroidCapabilityRegistry.MEDIA_STOP, android.view.KeyEvent.KEYCODE_MEDIA_STOP);
             case AndroidCapabilityRegistry.DEVICE_INFO:
                 return deviceInfo();
             default:
@@ -96,14 +101,12 @@ public final class AndroidActionExecutor {
         } catch (RuntimeException ex) {
             return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Android rejected app launch");
         }
-        Intent verify = pm.getLaunchIntentForPackage(packageName);
-        boolean verified = verify != null;
-        if (!verified) {
-            return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Launch could not be verified");
-        }
         Map<String, Object> data = new HashMap<>();
         data.put("package_name", packageName);
-        return Result.success(AndroidCapabilityRegistry.OPEN_APP, "Application launch requested and package is launchable", data);
+        data.put("launch_intent_available", true);
+        // Package launchability is verified; foreground visibility is intentionally
+        // left to the future device observation channel.
+        return Result.success(AndroidCapabilityRegistry.OPEN_APP, "Application launch requested", data);
     }
 
     private Result batteryRead() {
@@ -143,33 +146,42 @@ public final class AndroidActionExecutor {
     }
 
     private Result flashlight(boolean enabled) {
+        String capability = enabled ? AndroidCapabilityRegistry.FLASHLIGHT_ON : AndroidCapabilityRegistry.FLASHLIGHT_OFF;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            return Result.rejected(enabled ? AndroidCapabilityRegistry.FLASHLIGHT_ON : AndroidCapabilityRegistry.FLASHLIGHT_OFF,
-                    "Flashlight control requires Android 6.0 or newer");
+            return Result.rejected(capability, "Flashlight control requires Android 6.0 or newer");
         }
         CameraManager camera = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
-        if (camera == null) return Result.rejected(enabled ? AndroidCapabilityRegistry.FLASHLIGHT_ON : AndroidCapabilityRegistry.FLASHLIGHT_OFF, "Camera service unavailable");
+        if (camera == null) return Result.rejected(capability, "Camera service unavailable");
         try {
-            String[] ids = camera.getCameraIdList();
-            if (ids.length == 0) return Result.rejected(enabled ? AndroidCapabilityRegistry.FLASHLIGHT_ON : AndroidCapabilityRegistry.FLASHLIGHT_OFF, "No camera available");
-            String id = ids[0];
-            camera.setTorchMode(id, enabled);
+            String selected = null;
+            for (String id : camera.getCameraIdList()) {
+                CameraCharacteristics characteristics = camera.getCameraCharacteristics(id);
+                Boolean flash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                if (Boolean.TRUE.equals(flash)) {
+                    selected = id;
+                    break;
+                }
+            }
+            if (selected == null) return Result.rejected(capability, "No camera with flash is available");
+            camera.setTorchMode(selected, enabled);
             Map<String, Object> data = new HashMap<>();
             data.put("enabled", enabled);
-            data.put("camera_id", id);
-            return Result.success(enabled ? AndroidCapabilityRegistry.FLASHLIGHT_ON : AndroidCapabilityRegistry.FLASHLIGHT_OFF,
-                    enabled ? "Flashlight enabled" : "Flashlight disabled", data);
+            data.put("camera_id", selected);
+            return Result.success(capability, enabled ? "Flashlight enabled" : "Flashlight disabled", data);
         } catch (CameraAccessException | SecurityException ex) {
-            return Result.rejected(enabled ? AndroidCapabilityRegistry.FLASHLIGHT_ON : AndroidCapabilityRegistry.FLASHLIGHT_OFF, "Flashlight action was rejected");
+            return Result.rejected(capability, "Flashlight action was rejected");
         }
     }
 
-    private Result mediaKey(int keyCode) {
+    private Result mediaKey(String capability, int keyCode) {
         AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-        if (audio == null) return Result.rejected("MEDIA", "Audio service unavailable");
+        if (audio == null) return Result.rejected(capability, "Audio service unavailable");
         audio.dispatchMediaKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, keyCode));
         audio.dispatchMediaKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, keyCode));
-        return Result.success("MEDIA", "Media key dispatched", Collections.singletonMap("key_code", keyCode));
+        Map<String, Object> data = new HashMap<>();
+        data.put("key_code", keyCode);
+        // Dispatch is not proof that playback changed. Keep it explicitly unverified.
+        return Result.acceptedUnverified(capability, "Media key dispatched; playback requires observation verification", data);
     }
 
     private Result deviceInfo() {
