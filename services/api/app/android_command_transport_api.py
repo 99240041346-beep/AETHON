@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from aethon.android_command_transport import AndroidCommandTransport, CommandTransportError
 from aethon.auth import current_owner, security
-from aethon.device_gateway import Capability, GatewayError, gateway as _unused
+from aethon.device_gateway import GatewayError
 
 router = APIRouter(prefix="/v1/android/commands", tags=["android-command-transport"])
 
@@ -36,48 +37,36 @@ class ResultRequest(BaseModel):
     error: str | None = Field(default=None, max_length=2000)
 
 
+def _owner(credentials=Depends(security)) -> str:
+    return current_owner(credentials)
+
+
+def _gateway():
+    from aethon.device_gateway_api import gateway
+    return gateway
+
+
 def _transport() -> AndroidCommandTransport:
     return AndroidCommandTransport()
 
 
-def _device_owner(device_id: str, token: str):
-    from aethon.device_gateway_api import gateway
-    try:
-        return gateway.authenticate(device_id=device_id, token=token, owner_id=_owner_for_device(device_id, token)).owner_id
-    except GatewayError as exc:
-        raise HTTPException(401, str(exc)) from exc
-
-
-def _owner_for_device(device_id: str, token: str) -> str:
-    # Device authentication is deliberately separate from the user bearer token.
-    # The gateway's authenticated device record remains the source of owner scope.
-    from aethon.device_gateway_api import gateway
-    for candidate in ("local-dev",):
-        try:
-            return gateway.authenticate(device_id=device_id, token=token, owner_id=candidate).owner_id
-        except GatewayError:
-            continue
-    raise HTTPException(401, "device authentication failed")
-
-
 @router.post("")
-def enqueue(request: EnqueueRequest, owner_id: str = Depends(lambda credentials=Depends(security): current_owner(credentials))):
+def enqueue(request: EnqueueRequest, owner_id: str = Depends(_owner)):
     if request.capability not in _ALLOWED:
         raise HTTPException(400, "unsupported Android capability")
     if request.capability not in _READ_ONLY and not request.approval:
         raise HTTPException(403, "explicit execution approval required")
-    from aethon.device_gateway_api import gateway
     try:
-        device = gateway.status(device_id=request.device_id, owner_id=owner_id)
+        device = _gateway().status(device_id=request.device_id, owner_id=owner_id)
     except GatewayError as exc:
         raise HTTPException(404, str(exc)) from exc
-    if request.capability not in set(device["capabilities"]) and request.capability != "OPEN_APP":
+    if request.capability not in set(device["capabilities"]):
         raise HTTPException(403, "device capability not granted")
     try:
         command = _transport().enqueue(
             owner_id=owner_id, device_id=request.device_id, capability=request.capability,
-            arguments=request.arguments, nonce=__import__('secrets').token_urlsafe(24),
-            approved=request.approval, ttl_seconds=request.ttl_seconds,
+            arguments=request.arguments, nonce=secrets.token_urlsafe(24), approved=request.approval,
+            ttl_seconds=request.ttl_seconds,
         )
     except CommandTransportError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -90,9 +79,8 @@ def next_command(device_id: str, authorization: str | None = Header(default=None
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "device authentication required")
     token = authorization.split(" ", 1)[1].strip()
-    from aethon.device_gateway_api import gateway
     try:
-        device = gateway.authenticate_any_owner(device_id=device_id, token=token)
+        device = _gateway().authenticate_any_owner(device_id=device_id, token=token)
     except GatewayError as exc:
         raise HTTPException(401, str(exc)) from exc
     command = _transport().claim_next(device_id=device_id, owner_id=device.owner_id)
@@ -108,9 +96,8 @@ def result(device_id: str, request: ResultRequest, authorization: str | None = H
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "device authentication required")
     token = authorization.split(" ", 1)[1].strip()
-    from aethon.device_gateway_api import gateway
     try:
-        device = gateway.authenticate_any_owner(device_id=device_id, token=token)
+        device = _gateway().authenticate_any_owner(device_id=device_id, token=token)
     except GatewayError as exc:
         raise HTTPException(401, str(exc)) from exc
     try:
@@ -122,7 +109,7 @@ def result(device_id: str, request: ResultRequest, authorization: str | None = H
 
 
 @router.get("/status/{command_id}")
-def command_status(command_id: str, owner_id: str = Depends(lambda credentials=Depends(security): current_owner(credentials))):
+def command_status(command_id: str, owner_id: str = Depends(_owner)):
     command = _transport().get(command_id=command_id, owner_id=owner_id)
     if command is None:
         raise HTTPException(404, "command not found")
@@ -130,7 +117,7 @@ def command_status(command_id: str, owner_id: str = Depends(lambda credentials=D
 
 
 @router.post("/{command_id}/cancel")
-def cancel(command_id: str, owner_id: str = Depends(lambda credentials=Depends(security): current_owner(credentials))):
+def cancel(command_id: str, owner_id: str = Depends(_owner)):
     if not _transport().cancel(command_id=command_id, owner_id=owner_id):
         raise HTTPException(409, "command cannot be cancelled")
     return {"ok": True, "command_id": command_id, "status": "CANCELLED"}
