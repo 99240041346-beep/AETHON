@@ -122,8 +122,36 @@ def get_events(task_id: UUID, owner_id: str = Depends(owner)):
     if not task or task.owner_id != owner_id: raise HTTPException(404, 'task not found')
     return store.events(task_id)
 
+@app.get('/v1/tasks/{task_id}/plan', response_model=dict)
+def get_plan(task_id: UUID, owner_id: str = Depends(owner)):
+    task = store.get(task_id)
+    if not task or task.owner_id != owner_id: raise HTTPException(404, 'task not found')
+    snapshots = [event.data for event in store.events(task_id) if event.type in {'plan.created','plan.replanned'}]
+    if not snapshots: raise HTTPException(404, 'plan not found')
+    return snapshots[-1]
+
 @app.get('/v1/tasks/{task_id}/audit', response_model=list)
 def get_audit(task_id: UUID, owner_id: str = Depends(owner)):
     task = store.get(task_id)
     if not task or task.owner_id != owner_id: raise HTTPException(404, 'task not found')
     return store.audit(task_id)
+
+@app.post('/v1/tasks/{task_id}/pause', response_model=Task)
+def pause_task(task_id: UUID, owner_id: str = Depends(owner)):
+    task = store.get(task_id)
+    if not task or task.owner_id != owner_id: raise HTTPException(404, 'task not found')
+    try: return store.pause(task_id)
+    except ValueError as exc: raise HTTPException(409, str(exc)) from exc
+
+@app.post('/v1/tasks/{task_id}/resume', response_model=Task)
+def resume_task(task_id: UUID, owner_id: str = Depends(owner)):
+    task = store.get(task_id)
+    if not task or task.owner_id != owner_id: raise HTTPException(404, 'task not found')
+    try: return store.resume(task_id)
+    except ValueError as exc: raise HTTPException(409, str(exc)) from exc
+
+@app.post('/v1/tasks/{task_id}/cancel', response_model=Task)
+def cancel_task(task_id: UUID, owner_id: str = Depends(owner)):
+    task = store.get(task_id)
+    if not task or task.owner_id != owner_id: raise HTTPException(404, 'task not found')
+    return store.cancel(task_id)
