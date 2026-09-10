@@ -93,7 +93,7 @@ public final class AndroidCommandPoller {
         if (commandId.isEmpty() || command.optDouble("expires_at", 0) <= now) return;
         String capability = command.optString("capability", "");
         JSONObject jsonArgs = command.optJSONObject("arguments");
-        Map<String, Object> args = jsonArgs == null ? Collections.emptyMap() : jsonArgs.toMap();
+        Map<String, Object> args = jsonArgs == null ? Collections.emptyMap() : JsonObjectArguments.toMap(jsonArgs);
         AndroidActionExecutor.Result result = actionExecutor.execute(capability, args);
         postResult(commandId, result);
         main.post(() -> listener.onAction(result, commandId));
