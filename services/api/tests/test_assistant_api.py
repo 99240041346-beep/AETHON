@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from aethon.main import app
+from app.main import app
 
 
 def test_assistant_chat_defaults_to_telugu_and_returns_session():
