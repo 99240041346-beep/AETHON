@@ -19,12 +19,25 @@ class GatewayError(ValueError):
 
 class Capability(str, Enum):
     SCREEN_READ = "SCREEN_READ"
-    SCREEN_INTERACT = "SCREEN_INTERACT"
+    APP_LIST = "APP_LIST"
+    DEVICE_INFO = "DEVICE_INFO"
+    NETWORK_STATUS = "NETWORK_STATUS"
+    BATTERY_READ = "BATTERY_READ"
+    VOLUME_READ = "VOLUME_READ"
+    OPEN_APP = "OPEN_APP"
+    MEDIA_PLAY = "MEDIA_PLAY"
+    MEDIA_PAUSE = "MEDIA_PAUSE"
+    MEDIA_STOP = "MEDIA_STOP"
+    VOLUME_SET = "VOLUME_SET"
+    FLASHLIGHT_ON = "FLASHLIGHT_ON"
+    FLASHLIGHT_OFF = "FLASHLIGHT_OFF"
+    SCREEN_CAPTURE = "SCREEN_CAPTURE"
+    # Legacy name retained for compatibility with the older gateway API.
+    APP_OPEN = "APP_OPEN"
     CAMERA_READ = "CAMERA_READ"
     MICROPHONE_READ = "MICROPHONE_READ"
     LOCATION_READ = "LOCATION_READ"
     NOTIFICATION_READ = "NOTIFICATION_READ"
-    APP_OPEN = "APP_OPEN"
     FILE_READ = "FILE_READ"
 
 
@@ -123,7 +136,7 @@ class DeviceGateway:
             raise GatewayError("device capability not granted")
         if len(str(envelope.payload).encode("utf-8")) > self.MAX_PAYLOAD_BYTES:
             raise GatewayError("command payload too large")
-        risk = RiskClass.LOW if envelope.capability.endswith("_READ") or envelope.capability == Capability.APP_OPEN.value else RiskClass.MEDIUM
+        risk = RiskClass.LOW if envelope.capability.endswith("_READ") or envelope.capability in {Capability.APP_OPEN.value, Capability.OPEN_APP.value} else RiskClass.MEDIUM
         try:
             decision = self.safety.authorize(risk, side_effects=risk != RiskClass.LOW, approved=envelope.approved)
         except TypeError:
