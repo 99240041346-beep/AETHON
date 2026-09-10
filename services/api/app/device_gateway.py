@@ -96,6 +96,14 @@ class DeviceGateway:
             raise GatewayError("device authentication failed")
         return device
 
+    def authenticate_any_owner(self, *, device_id: str, token: str) -> Device:
+        """Authenticate a device token and derive owner scope from the authenticated record."""
+        device = self._devices.get(device_id)
+        if not device or not hmac.compare_digest(device.token_hash, self._hash(token)):
+            self._audit("device.auth.failed", device_id, "unknown", {})
+            raise GatewayError("device authentication failed")
+        return device
+
     def heartbeat(self, *, device_id: str, token: str, owner_id: str) -> dict[str, Any]:
         device = self.authenticate(device_id=device_id, token=token, owner_id=owner_id)
         self._devices[device_id] = Device(device.device_id, device.owner_id, device.platform, device.capabilities, device.token_hash, time.time(), device.nonce)
