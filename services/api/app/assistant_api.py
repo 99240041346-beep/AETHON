@@ -104,9 +104,45 @@ def respond(request: AssistantRequest, owner_id: str = Depends(owner)) -> Assist
     )
 
 
+@router.get("/sessions")
+def sessions(limit: int = 50, owner_id: str = Depends(owner)) -> list[dict]:
+    try:
+        return repository.sessions(owner_id, limit)
+    except Exception as exc:
+        raise HTTPException(503, "assistant persistence unavailable") from exc
+
+
+@router.get("/sessions/{session_id}")
+def session(session_id: str, owner_id: str = Depends(owner)) -> dict:
+    try:
+        result = repository.session(session_id, owner_id)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid session id") from exc
+    except Exception as exc:
+        raise HTTPException(503, "assistant persistence unavailable") from exc
+    if result is None:
+        raise HTTPException(404, "session not found")
+    return result
+
+
 @router.get("/sessions/{session_id}/messages")
 def history(session_id: str, limit: int = 50, owner_id: str = Depends(owner)) -> list[dict]:
     try:
         return repository.history(session_id, owner_id, limit)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid session id") from exc
     except Exception as exc:
         raise HTTPException(503, "assistant persistence unavailable") from exc
+
+
+@router.delete("/sessions/{session_id}")
+def archive_session(session_id: str, owner_id: str = Depends(owner)) -> dict:
+    try:
+        archived = repository.archive_session(session_id, owner_id)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid session id") from exc
+    except Exception as exc:
+        raise HTTPException(503, "assistant persistence unavailable") from exc
+    if not archived:
+        raise HTTPException(404, "session not found")
+    return {"ok": True, "session_id": session_id, "archived": True}
