@@ -90,7 +90,7 @@ public final class AndroidCommandService extends Service {
             if (command.optDouble("expires_at", 0) <= now) return;
             String capability = command.optString("capability", "");
             JSONObject argumentsJson = command.optJSONObject("arguments");
-            Map<String, Object> arguments = argumentsJson == null ? Collections.emptyMap() : argumentsJson.toMap();
+            Map<String, Object> arguments = argumentsJson == null ? Collections.emptyMap() : JsonObjectArguments.toMap(argumentsJson);
             AndroidActionExecutor.Result result = actionExecutor.execute(capability, arguments);
             postResult(command.optString("command_id", ""), result);
         } catch (Exception ignored) {
