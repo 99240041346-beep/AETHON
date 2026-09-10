@@ -45,12 +45,19 @@ def _language_instruction(language: str) -> str:
     return "Respond in the user's language when possible; keep technical terms clear."
 
 
+def _deterministic_fallback(request: VoiceRequest) -> str:
+    if request.language.lower().startswith("te"):
+        return f"నేను విన్నాను: {request.transcript}"
+    return f"I heard you: {request.transcript}"
+
+
 @router.post("/respond", response_model=VoiceResponse)
 def respond(request: VoiceRequest, owner_id: str = Depends(owner)) -> VoiceResponse:
     try:
         safety_gate.authorize(RiskClass.LOW, side_effects=False)
     except ExecutionAuthorizationError as exc:
         raise HTTPException(403, "voice request blocked by safety policy") from exc
+
     session_id = request.session_id or str(uuid4())
     prompt = (
         "You are AETHON, a bounded personal AI assistant. "
@@ -59,13 +66,27 @@ def respond(request: VoiceRequest, owner_id: str = Depends(owner)) -> VoiceRespo
         "Answer concisely. Never claim an external action occurred unless an authorized tool actually verified it. "
         f"User said: {request.transcript}"
     )
+
     try:
-        response = model_router.generate(prompt)
-        provider = model_router.provider.name
+        provider_name = model_router.provider.name
+        # The built-in deterministic provider is a development fallback, not a
+        # conversational model. Never expose its prompt echo to the user.
+        if provider_name == "deterministic":
+            response = _deterministic_fallback(request)
+            provider = "deterministic-fallback"
+        else:
+            response = model_router.generate(prompt)
+            provider = provider_name
     except Exception:
-        response = (f"నేను విన్నాను: {request.transcript}" if request.language.lower().startswith("te")
-                    else f"I heard you: {request.transcript}")
+        response = _deterministic_fallback(request)
         provider = "deterministic-fallback"
-    return VoiceResponse(ok=True, session_id=session_id, language=request.language,
-                         transcript=request.transcript, response=response,
-                         provider=provider, action_authorized=False)
+
+    return VoiceResponse(
+        ok=True,
+        session_id=session_id,
+        language=request.language,
+        transcript=request.transcript,
+        response=response,
+        provider=provider,
+        action_authorized=False,
+    )
