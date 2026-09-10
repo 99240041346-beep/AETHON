@@ -15,7 +15,7 @@ safety_gate = SafetyExecutionGate(SafetyKernel())
 command_bridge = AssistantCommandBridge()
 class VoiceRequest(BaseModel):
     transcript: str = Field(min_length=1, max_length=8000)
-    language: str = Field(default="en", min_length=2, max_length=20)
+    language: str = Field(default="te-IN", min_length=2, max_length=20)
     session_id: str | None = Field(default=None, max_length=100)
 class VoiceResponse(BaseModel):
     ok: bool
