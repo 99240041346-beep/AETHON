@@ -19,6 +19,7 @@ from aethon.voice_api import router as voice_router
 from aethon.device_gateway_api import router as device_router
 from aethon.assistant_api import router as assistant_router
 from app.language_api import router as language_router
+from aethon.android_command_transport_api import router as android_command_transport_router
 
 
 def build_task_store():
@@ -41,6 +42,7 @@ app.include_router(voice_router)
 app.include_router(device_router)
 app.include_router(assistant_router)
 app.include_router(language_router)
+app.include_router(android_command_transport_router)
 
 
 def owner(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> str:
