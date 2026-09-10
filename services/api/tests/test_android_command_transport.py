@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -14,17 +14,17 @@ class FakeStore:
     def execute(self, query, params=()):
         q = " ".join(query.split()).lower()
         if q.startswith("insert into device_commands"):
-            command_id, owner, device, capability, args, nonce, status, verified, issued, expires = params
+            command_id, owner, device, capability, args, nonce, issued, expires = params
             if any(row["nonce"] == nonce for row in self.rows.values()):
                 raise RuntimeError("duplicate nonce")
             self.rows[command_id] = {
                 "owner": owner, "device": device, "capability": capability, "args": args,
-                "nonce": nonce, "status": status, "verified": verified,
+                "nonce": nonce, "status": "ACCEPTED", "verified": False,
                 "issued": issued, "expires": expires, "claimed": None, "completed": None,
                 "error": None, "result": None, "verification": None,
             }
             return []
-        if q.startswith("update device_commands set claimed_at"):
+        if q.startswith("with next_command as"):
             device, owner, now = params
             candidates = [(k, v) for k, v in self.rows.items() if v["device"] == device and v["owner"] == owner and v["status"] == "ACCEPTED" and v["expires"] > now]
             if not candidates:
