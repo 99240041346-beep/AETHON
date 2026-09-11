@@ -59,4 +59,4 @@ def test_retry_attempt_is_persisted_in_workflow_metadata():
     result = _retry_workflow_step(_command(workflow), "owner-1", transport, step_index=0, attempt=2)
     assert result["command_id"] == "new-command"
     assert result["capability"] == "SCREEN_READ"
-    assert transport.enqueued[0]["arguments"]["_workflow"]["attempts"]["0"] == 2
+    assert transport.enqueued[0]["workflow"]["attempts"]["0"] == 2
