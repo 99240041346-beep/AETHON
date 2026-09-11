@@ -4,5 +4,5 @@
     android:accessibilityFeedbackType="feedbackGeneric"
     android:notificationTimeout="100"
     android:canRetrieveWindowContent="true"
-    android:description="AETHON uses accessibility only to observe authorized UI state for user-requested automation."
+    android:description="@string/aethon_accessibility_service_description"
     android:settingsActivity="ai.aethon.android.MainActivity" />
