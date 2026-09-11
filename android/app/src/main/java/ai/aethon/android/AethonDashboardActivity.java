@@ -10,24 +10,30 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+
 import org.json.JSONObject;
+
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.Map;
 
 /**
- * Personal AETHON command center. This is a UI layer over the existing
- * authenticated assistant API; it does not bypass Android permissions or
- * create unrestricted device control.
+ * Personal AETHON command center. Online AI uses the authenticated cloud API;
+ * bounded local controls continue to work without network access.
  */
 public final class AethonDashboardActivity extends Activity {
+    private static final String DEFAULT_PUBLIC_API = "https://aethon-personal-ai.onrender.com";
     private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final AndroidActionExecutor localExecutor = new AndroidActionExecutor(this);
     private EditText apiUrl;
     private EditText command;
     private TextView result;
+    private TextView mode;
 
     private int dp(float v) { return (int) (v * getResources().getDisplayMetrics().density + .5f); }
     private TextView text(String value, float size) {
@@ -94,10 +100,13 @@ public final class AethonDashboardActivity extends Activity {
         root.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout hero = cardLayout();
-        hero.addView(text("●  PERSONAL AGENT ONLINE", 15));
+        hero.addView(text("●  PERSONAL AGENT READY", 15));
         TextView detail = text("Think • Create • Code • Build • Control • Verify", 14);
         detail.setTextColor(Color.rgb(148,163,184));
         hero.addView(detail);
+        mode = text("ONLINE AI: cloud API   •   OFFLINE: local device controls", 12);
+        mode.setTextColor(Color.rgb(129,140,248));
+        hero.addView(mode);
         root.addView(hero);
 
         LinearLayout workspace = cardLayout();
@@ -121,7 +130,7 @@ public final class AethonDashboardActivity extends Activity {
         row2.addView(create, new LinearLayout.LayoutParams(0, dp(54), 1));
         Button analyze = action("◎  Analyze");
         analyze.setOnClickListener(v -> preset("Analyze my request deeply, identify requirements and risks, then propose the best implementation."));
-        LinearLayout ap = new LinearLayout.LayoutParams(0, dp(54), 1);
+        LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(0, dp(54), 1);
         ap.setMargins(dp(8),0,0,0);
         row2.addView(analyze, ap);
         workspace.addView(row2);
@@ -129,10 +138,39 @@ public final class AethonDashboardActivity extends Activity {
 
         LinearLayout device = cardLayout();
         device.addView(text("Android Control", 19));
-        device.addView(text("Authorized device actions use AETHON's authenticated, allowlisted and verification-gated channel.", 13));
+        device.addView(text("Offline controls run locally on this phone. Cloud connectivity is not required for these bounded actions.", 13));
+        LinearLayout local1 = new LinearLayout(this);
+        local1.setOrientation(LinearLayout.HORIZONTAL);
+        Button flashlight = action("🔦 Flashlight");
+        flashlight.setOnClickListener(v -> localAction(AndroidCapabilityRegistry.FLASHLIGHT_ON, Collections.emptyMap()));
+        local1.addView(flashlight, new LinearLayout.LayoutParams(0, dp(54), 1));
+        Button volume = action("🔊 Volume read");
+        volume.setOnClickListener(v -> localAction(AndroidCapabilityRegistry.VOLUME_READ, Collections.emptyMap()));
+        LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(0, dp(54), 1);
+        vp.setMargins(dp(8),0,0,0);
+        local1.addView(volume, vp);
+        device.addView(local1);
+        LinearLayout local2 = new LinearLayout(this);
+        local2.setOrientation(LinearLayout.HORIZONTAL);
+        Button battery = action("🔋 Battery");
+        battery.setOnClickListener(v -> localAction(AndroidCapabilityRegistry.BATTERY_READ, Collections.emptyMap()));
+        local2.addView(battery, new LinearLayout.LayoutParams(0, dp(54), 1));
+        Button info = action("ⓘ Device info");
+        info.setOnClickListener(v -> localAction(AndroidCapabilityRegistry.DEVICE_INFO, Collections.emptyMap()));
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(0, dp(54), 1);
+        ip.setMargins(dp(8),0,0,0);
+        local2.addView(info, ip);
+        device.addView(local2);
+        Button flashlightOff = action("◉  Flashlight OFF");
+        flashlightOff.setOnClickListener(v -> localAction(AndroidCapabilityRegistry.FLASHLIGHT_OFF, Collections.emptyMap()));
+        LinearLayout.LayoutParams off = new LinearLayout.LayoutParams(-1, dp(54));
+        off.setMargins(0, dp(8), 0, 0);
+        device.addView(flashlightOff, off);
         Button observe = action("👁  Observe device UI");
         observe.setOnClickListener(v -> preset("Observe my authorized Android device UI and summarize the visible actionable elements. Do not take any action yet."));
-        device.addView(observe);
+        LinearLayout.LayoutParams ob = new LinearLayout.LayoutParams(-1, dp(54));
+        ob.setMargins(0, dp(8), 0, 0);
+        device.addView(observe, ob);
         Button workflow = action("▶  Plan device workflow");
         workflow.setOnClickListener(v -> preset("Plan a safe multi-step workflow for my authorized Android device. Explain each step and request approval before side effects."));
         LinearLayout.LayoutParams f = new LinearLayout.LayoutParams(-1, dp(54));
@@ -143,7 +181,7 @@ public final class AethonDashboardActivity extends Activity {
         LinearLayout chat = cardLayout();
         chat.addView(text("Command", 19));
         apiUrl = field("Cloud API URL");
-        apiUrl.setText("http://10.0.2.2:8000");
+        apiUrl.setText(DEFAULT_PUBLIC_API);
         chat.addView(apiUrl);
         command = field("Tell AETHON what you want…");
         command.setSingleLine(false);
@@ -152,7 +190,7 @@ public final class AethonDashboardActivity extends Activity {
         Button send = action("➤  Run with AETHON");
         send.setOnClickListener(v -> send());
         chat.addView(send);
-        result = text("Ready. No action is claimed until the backend verifies it.", 13);
+        result = text("Ready. Online requests use HTTPS; local controls above do not require the network.", 13);
         result.setTextColor(Color.rgb(148,163,184));
         chat.addView(result);
         root.addView(chat);
@@ -186,22 +224,29 @@ public final class AethonDashboardActivity extends Activity {
         result.setText("Prompt prepared. Review it, then tap Run with AETHON.");
     }
 
+    private void localAction(String capability, Map<String, Object> arguments) {
+        AndroidActionExecutor.Result r = localExecutor.execute(capability, arguments);
+        result.setText((r.verified ? "OFFLINE • VERIFIED\n" : "OFFLINE • ACCEPTED\n") + r.message + (r.data.isEmpty() ? "" : "\n" + r.data));
+        mode.setText("OFFLINE CONTROL • no cloud connection required");
+    }
+
     private void send() {
         String base = apiUrl.getText().toString().trim().replaceAll("/+$", "");
         String prompt = command.getText().toString().trim();
         if (base.isEmpty() || prompt.isEmpty()) {
-            result.setText("Enter an API URL and a request first.");
+            result.setText("Enter a cloud API URL and a request first.");
             return;
         }
-        result.setText("AETHON is thinking…");
+        result.setText("AETHON is thinking online…");
+        mode.setText("ONLINE AI • HTTPS cloud connection");
         new Thread(() -> {
             HttpURLConnection c = null;
             try {
                 c = (HttpURLConnection) new URL(base + "/v1/assistant/respond").openConnection();
                 c.setRequestMethod("POST");
                 c.setDoOutput(true);
-                c.setConnectTimeout(8000);
-                c.setReadTimeout(30000);
+                c.setConnectTimeout(10000);
+                c.setReadTimeout(60000);
                 c.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 JSONObject body = new JSONObject();
                 body.put("text", prompt);
@@ -219,7 +264,7 @@ public final class AethonDashboardActivity extends Activity {
                 String answer = response.optString("response", "No response");
                 handler.post(() -> result.setText(answer));
             } catch (Exception e) {
-                handler.post(() -> result.setText("Connection failed: " + e.getMessage() + "\n\nFor a physical phone, use the API server's LAN IP or production HTTPS endpoint, not 10.0.2.2."));
+                handler.post(() -> result.setText("Cloud connection failed: " + e.getMessage() + "\n\nOffline device controls remain available above."));
             } finally {
                 if (c != null) c.disconnect();
             }
