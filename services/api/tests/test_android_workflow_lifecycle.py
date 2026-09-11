@@ -15,6 +15,11 @@ class FakeTransport:
         self.enqueued.append(kwargs)
         return SimpleNamespace(command_id="new-command", status="ACCEPTED")
 
+    def enqueue_workflow_step(self, **kwargs):
+        if self.pending:
+            return SimpleNamespace(command_id=self.pending["command_id"], capability=self.pending["capability"], status=self.pending["status"])
+        return self.enqueue(**kwargs)
+
 
 def _command(workflow):
     return {"device_id": "device-1", "arguments": {"_workflow": workflow}}
