@@ -53,9 +53,12 @@ class ToolSpec(BaseModel):
 class ToolRequest(BaseModel):
     tool: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    request_id: UUID = Field(default_factory=uuid4)
 
 
 class ToolResult(BaseModel):
     ok: bool
     output: Any | None = None
     error: str | None = None
+    request_id: UUID | None = None
+    verified: bool = False
