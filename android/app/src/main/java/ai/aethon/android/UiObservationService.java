@@ -67,8 +67,15 @@ public final class UiObservationService extends AccessibilityService {
         if (service == null) return error("Accessibility service is not enabled");
         if (blank(text) && blank(description) && blank(className) && blank(packageName)) return error("At least one semantic selector is required");
         AccessibilityNodeInfo root = service.getRootInActiveWindow();
-        AccessibilityNodeInfo target = findMatch(root, text, description, className, packageName, new int[]{0});
-        if (target == null) return error("No matching accessible UI node found");
+        if (root == null) return error("No active accessible window is available");
+
+        AccessibilityNodeInfo[] matches = new AccessibilityNodeInfo[2];
+        int[] matchCount = {0};
+        collectMatches(root, text, description, className, packageName, matches, matchCount);
+        if (matchCount[0] == 0) return error("No matching accessible UI node found");
+        if (matchCount[0] > 1) return error("Multiple matching accessible UI nodes found; action refused");
+
+        AccessibilityNodeInfo target = matches[0];
         boolean ok = false;
         switch (action) {
             case CLICK: ok = target.isEnabled() && target.isClickable() && target.performAction(AccessibilityNodeInfo.ACTION_CLICK); break;
@@ -86,15 +93,17 @@ public final class UiObservationService extends AccessibilityService {
         return result(ok, ok ? "UI action requested" : "UI action was rejected by Android", action.name().toLowerCase());
     }
 
-    private static AccessibilityNodeInfo findMatch(AccessibilityNodeInfo node, String text, String description, String className, String packageName, int[] visited) {
-        if (node == null || visited[0] >= 250) return null;
-        visited[0]++;
-        if (matches(node, text, description, className, packageName)) return AccessibilityNodeInfo.obtain(node);
-        for (int i = 0; i < node.getChildCount() && visited[0] < 250; i++) {
-            AccessibilityNodeInfo found = findMatch(node.getChild(i), text, description, className, packageName, visited);
-            if (found != null) return found;
+    private static void collectMatches(AccessibilityNodeInfo node, String text, String description, String className, String packageName,
+                                       AccessibilityNodeInfo[] matches, int[] matchCount) {
+        if (node == null || matchCount[0] > 1) return;
+        if (matches(node, text, description, className, packageName)) {
+            matchCount[0]++;
+            if (matchCount[0] <= 2) matches[matchCount[0] - 1] = AccessibilityNodeInfo.obtain(node);
+            if (matchCount[0] > 1) return;
         }
-        return null;
+        for (int i = 0; i < node.getChildCount() && matchCount[0] <= 1; i++) {
+            collectMatches(node.getChild(i), text, description, className, packageName, matches, matchCount);
+        }
     }
 
     private static boolean matches(AccessibilityNodeInfo node, String text, String description, String className, String packageName) {
