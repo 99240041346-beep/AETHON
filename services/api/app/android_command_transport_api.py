@@ -58,7 +58,7 @@ def _enqueue_step(command: dict[str, Any], owner_id: str, transport: AndroidComm
 
 def _enqueue_next_workflow_step(command: dict[str, Any], owner_id: str, transport: AndroidCommandTransport) -> dict[str, Any] | None:
     workflow = command.get("arguments", {}).get("_workflow")
-    if not isinstance(workflow, dict):
+    if not isinstance(workflow, dict) or workflow.get("state", "RUNNING") != "RUNNING":
         return None
     index = workflow.get("next_index")
     if not isinstance(index, int):
@@ -67,7 +67,7 @@ def _enqueue_next_workflow_step(command: dict[str, Any], owner_id: str, transpor
 
 def _retry_workflow_step(command: dict[str, Any], owner_id: str, transport: AndroidCommandTransport, *, step_index: int, attempt: int) -> dict[str, Any] | None:
     workflow = command.get("arguments", {}).get("_workflow")
-    if not isinstance(workflow, dict):
+    if not isinstance(workflow, dict) or workflow.get("state", "RUNNING") != "RUNNING":
         return None
     retry_workflow = with_attempt(workflow, step_index=step_index, attempt=attempt)
     return _enqueue_step(command, owner_id, transport, index=step_index, workflow=retry_workflow)
@@ -119,19 +119,20 @@ def result(device_id: str, request: ResultRequest, authorization: str | None = H
     try:
         recorded = transport.record_result(command_id=request.command_id, device_id=device_id, owner_id=device.owner_id, success=request.success, verified=effective_verified, result=request.result, verification=request.verification, error=request.error or ("semantic verification failed" if not semantic_verified else None))
     except CommandTransportError as exc: raise HTTPException(409, str(exc)) from exc
+    workflow_state = workflow.get("state", "RUNNING") if isinstance(workflow, dict) else None
     if recorded["status"] == "COMPLETED":
-        if not isinstance(workflow, dict):
-            return {"ok": True, "result": recorded, "workflow": {"status": "COMPLETED", "next": None}}
+        if not isinstance(workflow, dict) or workflow_state != "RUNNING":
+            return {"ok": True, "result": recorded, "workflow": {"status": workflow_state or "COMPLETED", "next": None}}
         try: next_step = _enqueue_next_workflow_step(command, device.owner_id, transport)
         except CommandTransportError as exc: raise HTTPException(409, "workflow could not advance") from exc
         return {"ok": True, "result": recorded, "workflow": {"status": "RUNNING" if next_step else "COMPLETED", "next": next_step}}
-    if isinstance(workflow, dict) and step_index >= 0:
+    if isinstance(workflow, dict) and workflow_state == "RUNNING" and step_index >= 0:
         decision = decide_retry(workflow, step_index=step_index, success=request.success, verified=effective_verified)
         if decision.retry:
             try: retry = _retry_workflow_step(command, device.owner_id, transport, step_index=step_index, attempt=decision.attempt)
             except CommandTransportError as exc: raise HTTPException(409, "workflow retry could not be queued") from exc
             return {"ok": True, "result": recorded, "workflow": {"status": "RETRYING", "attempt": decision.attempt, "max_retries": 2, "reason": decision.reason, "next": retry}}
-    return {"ok": True, "result": recorded, "workflow": {"status": "FAILED", "next": None}}
+    return {"ok": True, "result": recorded, "workflow": {"status": workflow_state or "FAILED", "next": None}}
 
 @router.get("/status/{command_id}")
 def command_status(command_id: str, owner_id: str = Depends(_owner)):
