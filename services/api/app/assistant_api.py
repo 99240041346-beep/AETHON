@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from aethon.assistant_orchestrator import AssistantMode, AssistantOrchestrator
@@ -45,17 +45,24 @@ class AssistantRequest(BaseModel):
     session_id: str | None = Field(default=None, max_length=100)
     project_id: str | None = Field(default=None, max_length=100)
 
+
 class DeviceActionRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     device_id: str = Field(min_length=1, max_length=128)
     approval: bool = False
     ttl_seconds: float = Field(default=15, gt=0, le=30)
 
+
 class DeviceWorkflowRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     device_id: str = Field(min_length=1, max_length=128)
     approval: bool = False
     ttl_seconds: float = Field(default=15, gt=0, le=30)
+
+
+class SessionRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
 
 class AssistantResponse(BaseModel):
     ok: bool
@@ -67,12 +74,15 @@ class AssistantResponse(BaseModel):
     requires_confirmation: bool
     action_authorized: bool = False
 
+
 def owner(credentials=Depends(security)) -> str:
     return current_owner(credentials)
+
 
 def _chat_prompt(request: AssistantRequest, owner_id: str, session_id: str, language: str) -> str:
     instruction = "Respond naturally in Telugu. Telugu-English mixed input is allowed; preserve useful English technical terms." if language.startswith("te") else "Respond naturally in English." if language.startswith("en") else "Respond naturally in the user's language when possible."
     return f"You are AETHON, a bounded personal AI assistant. Owner: {owner_id}. Session: {session_id}. {instruction} Be useful and concise. Never claim an external action occurred unless an authorized tool verified it. User: {request.text}"
+
 
 @router.post("/respond", response_model=AssistantResponse)
 def respond(request: AssistantRequest, owner_id: str = Depends(owner)) -> AssistantResponse:
@@ -82,6 +92,8 @@ def respond(request: AssistantRequest, owner_id: str = Depends(owner)) -> Assist
     try:
         repository.ensure_session(session_id, owner_id, language, request.project_id)
         repository.add_message(session_id, owner_id, "user", request.text, language)
+    except PermissionError as exc:
+        raise HTTPException(403, "session belongs to another owner") from exc
     except Exception as exc:
         raise HTTPException(503, "assistant persistence unavailable") from exc
     intent = orchestrator.classify(request.text)
@@ -97,9 +109,12 @@ def respond(request: AssistantRequest, owner_id: str = Depends(owner)) -> Assist
         response = orchestrator.respond(request.text, language=language).text
     try:
         repository.add_message(session_id, owner_id, "assistant", response, language, intent=intent.mode.value, action=intent.action, status="READY", metadata={"requires_confirmation": intent.requires_confirmation})
+    except PermissionError as exc:
+        raise HTTPException(403, "session belongs to another owner") from exc
     except Exception as exc:
         raise HTTPException(503, "assistant response persistence failed") from exc
     return AssistantResponse(ok=True, session_id=session_id, language=language, mode=intent.mode, intent=intent.action, response=response, requires_confirmation=intent.requires_confirmation, action_authorized=False)
+
 
 @router.post("/device-action")
 def device_action(request: DeviceActionRequest, owner_id: str = Depends(owner)) -> dict:
@@ -121,6 +136,7 @@ def device_action(request: DeviceActionRequest, owner_id: str = Depends(owner)) 
     except CommandTransportError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "authorized": True, "requires_confirmation": False, "intent": intent.action, "capability": capability, "command_id": command.command_id, "status": command.status, "expires_at": command.expires_at}
+
 
 @router.post("/device-workflow")
 def device_workflow(request: DeviceWorkflowRequest, owner_id: str = Depends(owner)) -> dict:
@@ -145,12 +161,14 @@ def device_workflow(request: DeviceWorkflowRequest, owner_id: str = Depends(owne
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "authorized": True, "workflow_started": True, "workflow_id": workflow_id, "step_index": 0, "step_count": len(steps), "command_id": command.command_id, "capability": command.capability, "status": command.status}
 
+
 @router.get("/android-workflows/{workflow_id}")
 def workflow_status(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
     workflow = _transport().workflow(workflow_id=workflow_id, owner_id=owner_id)
     if workflow is None:
         raise HTTPException(404, "workflow not found")
     return {"ok": True, **workflow}
+
 
 @router.post("/android-workflows/{workflow_id}/pause")
 def pause_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
@@ -162,6 +180,7 @@ def pause_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
         raise HTTPException(404, "workflow not found")
     return {"ok": True, "workflow": workflow, "state": "PAUSED"}
 
+
 @router.post("/android-workflows/{workflow_id}/cancel")
 def cancel_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
     try:
@@ -171,6 +190,7 @@ def cancel_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
     if workflow is None:
         raise HTTPException(404, "workflow not found")
     return {"ok": True, "workflow": workflow, "state": "CANCELLED"}
+
 
 @router.post("/android-workflows/{workflow_id}/resume")
 def resume_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
@@ -235,29 +255,92 @@ def resume_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
     except CommandTransportError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+
 @router.get("/sessions")
-def sessions(limit: int = 50, owner_id: str = Depends(owner)) -> list[dict]:
-    try: return repository.sessions(owner_id, limit)
-    except Exception as exc: raise HTTPException(503, "assistant persistence unavailable") from exc
+def sessions(
+    limit: int = Query(default=50, ge=1, le=100),
+    include_archived: bool = False,
+    q: str | None = Query(default=None, max_length=200),
+    owner_id: str = Depends(owner),
+) -> list[dict]:
+    try:
+        return repository.sessions(owner_id, limit, include_archived, q)
+    except Exception as exc:
+        raise HTTPException(503, "assistant persistence unavailable") from exc
+
+
+# Must be declared before /sessions/{session_id}; otherwise FastAPI treats 'search' as a session id.
+@router.get("/sessions/search")
+def search_sessions(
+    q: str = Query(min_length=1, max_length=200),
+    limit: int = Query(default=50, ge=1, le=100),
+    owner_id: str = Depends(owner),
+) -> list[dict]:
+    try:
+        return repository.search_sessions(owner_id, q, limit)
+    except Exception as exc:
+        raise HTTPException(503, "assistant persistence unavailable") from exc
+
 
 @router.get("/sessions/{session_id}")
 def session(session_id: str, owner_id: str = Depends(owner)) -> dict:
-    try: result = repository.session(session_id, owner_id)
-    except ValueError as exc: raise HTTPException(400, "invalid session id") from exc
-    except Exception as exc: raise HTTPException(503, "assistant persistence unavailable") from exc
-    if result is None: raise HTTPException(404, "session not found")
+    try:
+        result = repository.session(session_id, owner_id)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid session id") from exc
+    except Exception as exc:
+        raise HTTPException(503, "assistant persistence unavailable") from exc
+    if result is None:
+        raise HTTPException(404, "session not found")
     return result
 
+
+@router.patch("/sessions/{session_id}")
+def rename_session(session_id: str, request: SessionRenameRequest, owner_id: str = Depends(owner)) -> dict:
+    try:
+        renamed = repository.rename_session(session_id, owner_id, request.title)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, "assistant persistence unavailable") from exc
+    if not renamed:
+        raise HTTPException(404, "session not found")
+    return {"ok": True, "session_id": session_id, "title": request.title.strip()}
+
+
 @router.get("/sessions/{session_id}/messages")
-def history(session_id: str, limit: int = 50, owner_id: str = Depends(owner)) -> list[dict]:
-    try: return repository.history(session_id, owner_id, limit)
-    except ValueError as exc: raise HTTPException(400, "invalid session id") from exc
-    except Exception as exc: raise HTTPException(503, "assistant persistence unavailable") from exc
+def history(session_id: str, limit: int = Query(default=50, ge=1, le=100), owner_id: str = Depends(owner)) -> list[dict]:
+    try:
+        return repository.history(session_id, owner_id, limit)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid session id") from exc
+    except Exception as exc:
+        raise HTTPException(503, "assistant persistence unavailable") from exc
+
 
 @router.delete("/sessions/{session_id}")
 def archive_session(session_id: str, owner_id: str = Depends(owner)) -> dict:
-    try: archived = repository.archive_session(session_id, owner_id)
-    except ValueError as exc: raise HTTPException(400, "invalid session id") from exc
-    except Exception as exc: raise HTTPException(503, "assistant persistence unavailable") from exc
-    if not archived: raise HTTPException(404, "session not found")
+    try:
+        archived = repository.archive_session(session_id, owner_id)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid session id") from exc
+    except Exception as exc:
+        raise HTTPException(503, "assistant persistence unavailable") from exc
+    if not archived:
+        raise HTTPException(404, "session not found")
     return {"ok": True, "session_id": session_id, "archived": True}
+
+
+@router.delete("/sessions/{session_id}/permanent")
+def permanently_delete_session(session_id: str, confirm: bool = Query(default=False), owner_id: str = Depends(owner)) -> dict:
+    if not confirm:
+        raise HTTPException(400, "permanent deletion requires confirm=true")
+    try:
+        deleted = repository.delete_session(session_id, owner_id)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid session id") from exc
+    except Exception as exc:
+        raise HTTPException(503, "assistant persistence unavailable") from exc
+    if not deleted:
+        raise HTTPException(404, "session not found")
+    return {"ok": True, "session_id": session_id, "deleted": True}
