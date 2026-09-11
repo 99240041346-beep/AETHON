@@ -6,7 +6,23 @@ from aethon.web_search import WebSearch
 
 
 class CalculatorTool:
-    spec = ToolSpec(name='calculator', description='Evaluate a basic arithmetic expression safely.', risk=RiskClass.LOW)
+    spec = ToolSpec(
+        name='calculator',
+        description='Evaluate a basic arithmetic expression safely.',
+        input_schema={
+            'type': 'object',
+            'properties': {'expression': {'type': 'string', 'minLength': 1, 'maxLength': 1000}},
+            'required': ['expression'],
+            'additionalProperties': False,
+        },
+        output_schema={'type': 'number'},
+        risk=RiskClass.LOW,
+        side_effects=False,
+        timeout_seconds=5,
+        max_retries=0,
+        authentication='owner',
+        audit_required=True,
+    )
     _ops = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv, ast.Mod: op.mod, ast.Pow: op.pow, ast.USub: op.neg}
 
     def execute(self, expression: str) -> ToolResult:
@@ -28,7 +44,26 @@ class CalculatorTool:
 
 
 class WebSearchTool:
-    spec = ToolSpec(name='web_search', description='Search the public web for information.', risk=RiskClass.LOW, side_effects=False)
+    spec = ToolSpec(
+        name='web_search',
+        description='Search the public web for information.',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'query': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
+                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10},
+            },
+            'required': ['query'],
+            'additionalProperties': False,
+        },
+        output_schema={'type': 'array', 'items': {'type': 'object'}},
+        risk=RiskClass.LOW,
+        side_effects=False,
+        timeout_seconds=15,
+        max_retries=1,
+        authentication='owner',
+        audit_required=True,
+    )
 
     def __init__(self, provider=None):
         self.provider = provider or WebSearch()
@@ -45,7 +80,23 @@ class WebSearchTool:
 
 
 class WebFetchTool:
-    spec = ToolSpec(name='web_fetch', description='Fetch a public HTTP(S) web page with security limits.', risk=RiskClass.LOW, side_effects=False)
+    spec = ToolSpec(
+        name='web_fetch',
+        description='Fetch a public HTTP(S) web page with security limits.',
+        input_schema={
+            'type': 'object',
+            'properties': {'url': {'type': 'string', 'format': 'uri', 'maxLength': 4000}},
+            'required': ['url'],
+            'additionalProperties': False,
+        },
+        output_schema={'type': 'object'},
+        risk=RiskClass.LOW,
+        side_effects=False,
+        timeout_seconds=15,
+        max_retries=1,
+        authentication='owner',
+        audit_required=True,
+    )
 
     def __init__(self, fetcher=None):
         self.fetcher = fetcher or WebFetcher()
@@ -72,5 +123,9 @@ class ToolRegistry:
     def execute(self, request):
         tool = self._tools.get(request.tool)
         if not tool:
-            return ToolResult(ok=False, error='tool not found')
-        return tool.execute(**request.arguments)
+            return ToolResult(ok=False, error='tool not found', request_id=request.request_id)
+        try:
+            result = tool.execute(**request.arguments)
+            return result.model_copy(update={'request_id': request.request_id})
+        except Exception as exc:
+            return ToolResult(ok=False, error=f'tool execution failed: {exc}', request_id=request.request_id)
