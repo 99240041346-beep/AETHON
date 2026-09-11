@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AETHON</string>
+    <string name="aethon_accessibility_service_description">AETHON uses accessibility only to observe authorized UI state for user-requested automation.</string>
 </resources>
