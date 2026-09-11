@@ -9,10 +9,8 @@ from uuid import uuid4
 
 from aethon.postgres import PostgresStore
 
-
 class CommandTransportError(ValueError):
     pass
-
 
 @dataclass(frozen=True)
 class PersistedCommand:
@@ -26,10 +24,8 @@ class PersistedCommand:
     expires_at: float
     status: str
 
-
 class AndroidCommandTransport:
     """PostgreSQL-backed command queue with atomic claim and result verification state."""
-
     MAX_TTL_SECONDS = 30
 
     def __init__(self, database_url: str | None = None):
@@ -58,7 +54,6 @@ class AndroidCommandTransport:
         return PersistedCommand(command_id, owner_id, device_id, capability, arguments, nonce, issued, expires, "ACCEPTED")
 
     def claim_next(self, *, device_id: str, owner_id: str) -> PersistedCommand | None:
-        """Atomically claim one unexpired command using row locking and SKIP LOCKED."""
         now = self._ts(time.time())
         rows = self.store.execute(
             """WITH next_command AS (
@@ -97,7 +92,9 @@ class AndroidCommandTransport:
         r = rows[0]; return {"command_id": str(r[0]), "status": r[1], "verified": bool(r[2]), "error": r[3]}
 
     def get(self, *, command_id: str, owner_id: str) -> dict[str, Any] | None:
-        rows = self.store.execute("""SELECT command_id,owner_id,device_id,capability,status,verified,error,issued_at,expires_at,claimed_at,completed_at,result_json,verification_json FROM device_commands WHERE command_id=%s AND owner_id=%s""", (command_id, owner_id))
+        rows = self.store.execute("""SELECT command_id,owner_id,device_id,capability,status,verified,error,issued_at,expires_at,claimed_at,completed_at,arguments_json,result_json,verification_json FROM device_commands WHERE command_id=%s AND owner_id=%s""", (command_id, owner_id))
         if not rows: return None
         r = rows[0]
-        return {"command_id": str(r[0]), "owner_id": r[1], "device_id": r[2], "capability": r[3], "status": r[4], "verified": bool(r[5]), "error": r[6], "issued_at": r[7].isoformat(), "expires_at": r[8].isoformat(), "claimed_at": r[9].isoformat() if r[9] else None, "completed_at": r[10].isoformat() if r[10] else None, "result": r[11] if isinstance(r[11], dict) else (json.loads(r[11]) if r[11] else None), "verification": r[12] if isinstance(r[12], dict) else (json.loads(r[12]) if r[12] else None)}
+        arguments = r[11] if isinstance(r[11], dict) else (json.loads(r[11]) if r[11] else {})
+        arguments.pop("_approved", None)
+        return {"command_id": str(r[0]), "owner_id": r[1], "device_id": r[2], "capability": r[3], "status": r[4], "verified": bool(r[5]), "error": r[6], "issued_at": r[7].isoformat(), "expires_at": r[8].isoformat(), "claimed_at": r[9].isoformat() if r[9] else None, "completed_at": r[10].isoformat() if r[10] else None, "arguments": arguments, "result": r[12] if isinstance(r[12], dict) else (json.loads(r[12]) if r[12] else None), "verification": r[13] if isinstance(r[13], dict) else (json.loads(r[13]) if r[13] else None)}
