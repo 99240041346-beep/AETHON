@@ -26,7 +26,12 @@ class FakeStore:
             return []
         if q.startswith("with next_command as"):
             device, owner, now = params
-            candidates = [(k, v) for k, v in self.rows.items() if v["device"] == device and v["owner"] == owner and v["status"] == "ACCEPTED" and v["expires"] > now]
+            candidates = [
+                (k, v) for k, v in self.rows.items()
+                if v["device"] == device and v["owner"] == owner
+                and v["status"] == "ACCEPTED" and v["expires"] > now
+                and v["claimed"] is None
+            ]
             if not candidates:
                 return []
             command_id, row = sorted(candidates, key=lambda item: item[1]["issued"])[0]
@@ -49,7 +54,7 @@ class FakeStore:
         if q.startswith("update device_commands set status=%s"):
             status, verified, result, verification, error, command_id, owner, device = params
             row = self.rows.get(command_id)
-            if not row or row["owner"] != owner or row["device"] != device or row["status"] != "ACCEPTED" or row["expires"] <= datetime.now(timezone.utc):
+            if not row or row["owner"] != owner or row["device"] != device or row["status"] != "ACCEPTED" or row["claimed"] is None or row["expires"] <= datetime.now(timezone.utc):
                 return []
             row.update(status=status, verified=verified, result=result, verification=verification, error=error)
             return [(command_id, status, verified, error)]
@@ -57,7 +62,7 @@ class FakeStore:
             command_id, owner = params
             row = self.rows.get(command_id)
             if not row or row["owner"] != owner: return []
-            return [(command_id, owner, row["device"], row["capability"], row["status"], row["verified"], row["error"], row["issued"], row["expires"], row["claimed"], row["completed"], row["result"], row["verification"])]
+            return [(command_id, owner, row["device"], row["capability"], row["status"], row["verified"], row["error"], row["issued"], row["expires"], row["claimed"], row["completed"], row["args"], row["result"], row["verification"])]
         raise AssertionError(q)
 
 
@@ -74,6 +79,22 @@ def test_enqueue_claim_and_verified_completion():
     assert claimed and claimed.command_id == command.command_id
     result = t.record_result(command_id=command.command_id, device_id="phone-1", owner_id="owner-a", success=True, verified=True, verification={"package_visible": True})
     assert result["status"] == "COMPLETED" and result["verified"] is True
+
+
+def test_claim_is_single_delivery_until_result_or_expiry():
+    t = transport()
+    command = t.enqueue(owner_id="owner-a", device_id="phone-1", capability="OPEN_APP", arguments={}, nonce="nonce-12345678", approved=True)
+    first = t.claim_next(device_id="phone-1", owner_id="owner-a")
+    second = t.claim_next(device_id="phone-1", owner_id="owner-a")
+    assert first and first.command_id == command.command_id
+    assert second is None
+
+
+def test_unclaimed_result_is_rejected():
+    t = transport()
+    command = t.enqueue(owner_id="owner-a", device_id="phone-1", capability="OPEN_APP", arguments={}, nonce="nonce-12345678", approved=True)
+    with pytest.raises(CommandTransportError, match="unclaimed"):
+        t.record_result(command_id=command.command_id, device_id="phone-1", owner_id="owner-a", success=True, verified=True)
 
 
 def test_replay_nonce_is_rejected_by_persistence_boundary():
