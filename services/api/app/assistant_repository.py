@@ -30,6 +30,11 @@ class AssistantRepository:
     def _limit(value: int, maximum: int = 100) -> int:
         return max(1, min(value, maximum))
 
+    @staticmethod
+    def _search_pattern(query: str) -> str:
+        # Escape LIKE metacharacters so user search text is treated literally.
+        return "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
     def ensure_session(self, session_id: str, owner_id: str, language: str, project_id: str | None = None) -> str:
         if not self.enabled:
             now = self._now()
@@ -41,13 +46,18 @@ class AssistantRepository:
                 if project_id is not None:
                     session["project_id"] = project_id
                 session["updated_at"] = now
+            else:
+                raise PermissionError("session belongs to another owner")
             return session_id
         with psycopg.connect(self.database_url) as conn:
-            conn.execute("""INSERT INTO assistant_sessions(session_id, owner_id, project_id, language)
+            result = conn.execute("""INSERT INTO assistant_sessions(session_id, owner_id, project_id, language)
                 VALUES (%s, %s, %s, %s)
-                ON CONFLICT (session_id) DO UPDATE SET language=EXCLUDED.language, updated_at=NOW()""",
+                ON CONFLICT (session_id) DO UPDATE SET language=EXCLUDED.language, updated_at=NOW()
+                WHERE assistant_sessions.owner_id = EXCLUDED.owner_id""",
                 (UUID(session_id), owner_id, project_id, language))
             conn.commit()
+            if result.rowcount != 1:
+                raise PermissionError("session belongs to another owner")
         return session_id
 
     def add_message(self, session_id: str, owner_id: str, role: str, content: str, language: str,
@@ -57,12 +67,15 @@ class AssistantRepository:
         if not self.enabled:
             session = self._memory_sessions.get(session_id)
             if session is None or session.get("owner_id") != owner_id:
-                return message_id
+                raise PermissionError("session not found for owner")
             self._memory_messages.setdefault(session_id, []).append({"message_id": message_id, "role": role, "content": content, "language": language, "intent": intent, "action": action, "status": status, "metadata": metadata or {}, "created_at": self._now()})
             self._memory_messages[session_id] = self._memory_messages[session_id][-self._memory_limit:]
             session["updated_at"] = self._now()
             return message_id
         with psycopg.connect(self.database_url) as conn:
+            exists = conn.execute("SELECT 1 FROM assistant_sessions WHERE session_id=%s AND owner_id=%s", (UUID(session_id), owner_id)).fetchone()
+            if not exists:
+                raise PermissionError("session not found for owner")
             conn.execute("""INSERT INTO assistant_messages
                 (message_id, session_id, owner_id, role, content, language, intent, action, status, metadata)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
@@ -96,8 +109,9 @@ class AssistantRepository:
         if not include_archived:
             where += " AND archived_at IS NULL"
         if q:
-            where += " AND (COALESCE(title,'') ILIKE %s OR session_id::text ILIKE %s)"
-            params.extend([f"%{q}%", f"%{q}%"])
+            where += " AND (COALESCE(title,'') ILIKE %s ESCAPE '\\\\' OR session_id::text ILIKE %s ESCAPE '\\\\')"
+            pattern = self._search_pattern(q)
+            params.extend([pattern, pattern])
         params.append(limit)
         with psycopg.connect(self.database_url) as conn:
             rows = conn.execute(f"""SELECT session_id, project_id, title, language, archived_at, created_at, updated_at
