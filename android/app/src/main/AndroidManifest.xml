@@ -19,6 +19,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".AethonDashboardActivity"
+            android:exported="false" />
         <service
             android:name=".AndroidCommandService"
             android:exported="false"
