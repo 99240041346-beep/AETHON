@@ -25,7 +25,7 @@ class PersistedCommand:
     status: str
 
 class AndroidCommandTransport:
-    """PostgreSQL-backed command queue with atomic claim and result verification state."""
+    """PostgreSQL-backed command queue with single-claim delivery and result verification."""
     MAX_TTL_SECONDS = 30
 
     def __init__(self, database_url: str | None = None):
@@ -58,7 +58,8 @@ class AndroidCommandTransport:
         rows = self.store.execute(
             """WITH next_command AS (
                    SELECT command_id FROM device_commands
-                   WHERE device_id=%s AND owner_id=%s AND status='ACCEPTED' AND expires_at>%s
+                   WHERE device_id=%s AND owner_id=%s AND status='ACCEPTED'
+                     AND expires_at>%s AND claimed_at IS NULL
                    ORDER BY issued_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
                )
                UPDATE device_commands AS dc SET claimed_at=NOW()
@@ -84,11 +85,11 @@ class AndroidCommandTransport:
         rows = self.store.execute(
             """UPDATE device_commands SET status=%s, verified=%s, result_json=%s::jsonb, verification_json=%s::jsonb,
                error=%s, completed_at=NOW(), result_received_at=NOW()
-               WHERE command_id=%s AND owner_id=%s AND device_id=%s AND status='ACCEPTED' AND expires_at>NOW()
+               WHERE command_id=%s AND owner_id=%s AND device_id=%s AND status='ACCEPTED' AND claimed_at IS NOT NULL AND expires_at>NOW()
                RETURNING command_id,status,verified,error""",
             (status, verified, json.dumps(result or {}), json.dumps(verification or {}), error, command_id, owner_id, device_id),
         )
-        if not rows: raise CommandTransportError("command is missing, expired, cancelled, or already completed")
+        if not rows: raise CommandTransportError("command is missing, expired, cancelled, unclaimed, or already completed")
         r = rows[0]; return {"command_id": str(r[0]), "status": r[1], "verified": bool(r[2]), "error": r[3]}
 
     def get(self, *, command_id: str, owner_id: str) -> dict[str, Any] | None:
