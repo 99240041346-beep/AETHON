@@ -57,12 +57,29 @@ def test_runtime_respond_is_authenticated_and_returns_contract(monkeypatch):
 
 def test_runtime_respond_rejects_missing_authentication(monkeypatch):
     monkeypatch.setattr(runtime_api, "runtime", FakeRuntime())
+    monkeypatch.setenv("AETHON_API_TOKEN", "test-secret")
     response = TestClient(app).post(
         "/v1/assistant/runtime/respond",
         json={"text": "Hello", "language": "en-IN"},
     )
 
-    assert response.status_code in {401, 403}
+    assert response.status_code == 401
+
+
+def test_runtime_respond_accepts_configured_bearer_token(monkeypatch):
+    test_client = client(monkeypatch)
+    monkeypatch.setenv("AETHON_API_TOKEN", "test-secret")
+    try:
+        response = test_client.post(
+            "/v1/assistant/runtime/respond",
+            headers={"Authorization": "Bearer test-secret"},
+            json={"text": "Hello", "language": "en-IN"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
 
 
 def test_runtime_stream_emits_started_progress_and_completed(monkeypatch):
