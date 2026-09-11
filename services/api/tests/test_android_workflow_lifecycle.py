@@ -13,7 +13,11 @@ class FakeTransport:
 
     def enqueue(self, **kwargs):
         self.enqueued.append(kwargs)
-        return SimpleNamespace(command_id="new-command", status="ACCEPTED")
+        return SimpleNamespace(
+            command_id="new-command",
+            capability=kwargs["capability"],
+            status="ACCEPTED",
+        )
 
     def enqueue_workflow_step(self, **kwargs):
         if self.pending:
@@ -54,4 +58,5 @@ def test_retry_attempt_is_persisted_in_workflow_metadata():
     workflow = {"id": "wf-1", "state": "RUNNING", "next_index": 1, "steps": [{"capability": "SCREEN_READ", "arguments": {}}], "attempts": {"0": 1}}
     result = _retry_workflow_step(_command(workflow), "owner-1", transport, step_index=0, attempt=2)
     assert result["command_id"] == "new-command"
+    assert result["capability"] == "SCREEN_READ"
     assert transport.enqueued[0]["arguments"]["_workflow"]["attempts"]["0"] == 2
