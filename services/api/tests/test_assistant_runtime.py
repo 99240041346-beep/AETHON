@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from aethon.assistant_orchestrator import AssistantMode
 from aethon.model_router import DeterministicProvider, ModelRouter
+from aethon.schemas import RiskClass, ToolSpec
 from app.assistant_repository import AssistantRepository
 from app.assistant_runtime import AssistantRuntime
 
@@ -42,6 +43,48 @@ def test_calculator_tool_is_routed_and_recorded():
     assert result.verified is False
 
 
+def test_side_effecting_tool_requires_approval_without_execution():
+    class SideEffectRegistry:
+        spec = ToolSpec(
+            name="dangerous_test_tool",
+            description="Test-only side effecting tool.",
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+            risk=RiskClass.HIGH,
+            side_effects=True,
+            timeout_seconds=5,
+            max_retries=0,
+            authentication="owner",
+            audit_required=True,
+        )
+
+        def list(self):
+            return [self.spec]
+
+        def execute(self, request):
+            raise AssertionError("tool executed without approval")
+
+    rt = runtime()
+    rt.tools = SideEffectRegistry()
+    original = rt._tool_intent
+    rt._tool_intent = lambda intent: ("dangerous_test_tool", {})
+    try:
+        result = rt.run(
+            owner_id="owner-a",
+            session_id="s5",
+            text="run dangerous_test_tool",
+            language="en-IN",
+            require_approval=False,
+        )
+    finally:
+        rt._tool_intent = original
+
+    assert result.requires_confirmation is True
+    assert result.action_authorized is False
+    assert result.error is None
+    assert any(event.type == "approval.required" for event in result.events)
+
+
 def test_action_is_planned_but_not_executed_by_model_runtime():
     rt = runtime()
     result = rt.run(owner_id="owner-a", session_id="s3", text="click Settings", language="en-IN")
@@ -57,8 +100,10 @@ def test_action_is_planned_but_not_executed_by_model_runtime():
 def test_model_failure_is_truthful_and_persisted():
     class FailingProvider:
         name = "test-failing"
+
         def generate(self, prompt: str) -> str:
             raise RuntimeError("offline")
+
         def health(self) -> bool:
             return False
 
