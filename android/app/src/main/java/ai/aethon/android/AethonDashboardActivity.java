@@ -119,7 +119,7 @@ public final class AethonDashboardActivity extends Activity {
         row1.addView(code, new LinearLayout.LayoutParams(0, dp(54), 1));
         Button website = action("◇  Website");
         website.setOnClickListener(v -> preset("Create a complete modern website from my idea. Produce the architecture, UI, frontend, backend/API and database plan, then generate the implementation files."));
-        LinearLayout wp = new LinearLayout.LayoutParams(0, dp(54), 1);
+        LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(0, dp(54), 1);
         wp.setMargins(dp(8),0,0,0);
         row1.addView(website, wp);
         workspace.addView(row1);
