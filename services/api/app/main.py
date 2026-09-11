@@ -20,6 +20,7 @@ from aethon.device_gateway_api import router as device_router
 from aethon.assistant_api import router as assistant_router
 from app.language_api import router as language_router
 from aethon.android_command_transport_api import router as android_command_transport_router
+from app.capability_registry import CapabilityRegistry
 
 
 def build_task_store():
@@ -38,6 +39,7 @@ tools = ToolRegistry()
 safety = SafetyKernel()
 safety_gate = SafetyExecutionGate(safety)
 model_router = ModelRouter()
+capabilities = CapabilityRegistry({spec.name for spec in tools.list()})
 app.include_router(voice_router)
 app.include_router(device_router)
 app.include_router(assistant_router)
@@ -70,11 +72,15 @@ def scheduler_status(owner_id: str = Depends(owner)):
 def model_health():
     return {'ok': model_router.health(), 'provider': model_router.provider.name}
 
+@app.get('/v1/capabilities')
+def list_capabilities():
+    return {'ok': True, 'capabilities': capabilities.list()}
+
 @app.get('/v1/tools')
 def list_tools(): return tools.list()
 
 @app.post('/v1/tools/execute')
-def execute_tool(request: ToolRequest):
+def execute_tool(request: ToolRequest, owner_id: str = Depends(owner)):
     spec = next((x for x in tools.list() if x.name == request.tool), None)
     if not spec: raise HTTPException(404, 'tool not found')
     try:
@@ -83,7 +89,10 @@ def execute_tool(request: ToolRequest):
         raise HTTPException(403, str(exc)) from exc
     if authorization.effective_decision != 'ALLOW':
         raise HTTPException(403, 'execution blocked by safety policy')
-    return tools.execute(request)
+    result = tools.execute(request)
+    if not result.ok:
+        raise HTTPException(502, result.error or 'tool execution failed')
+    return {'ok': True, 'owner_id': owner_id, 'tool': request.tool, 'result': result.output}
 
 @app.post('/v1/memory')
 def create_memory(request: MemoryWriteRequest, owner_id: str = Depends(owner)):
