@@ -6,10 +6,14 @@ import java.util.Set;
 
 /**
  * Explicit allowlist of Android capabilities exposed to the cloud command layer.
- * This registry intentionally contains no shell or arbitrary automation capability.
+ * UI interaction is semantic and bounded; no shell, root, or arbitrary coordinates.
  */
 public final class AndroidCapabilityRegistry {
     public static final String SCREEN_READ = "SCREEN_READ";
+    public static final String SCREEN_CLICK = "SCREEN_CLICK";
+    public static final String SCREEN_SCROLL = "SCREEN_SCROLL";
+    public static final String SCREEN_TEXT = "SCREEN_TEXT";
+    public static final String SCREEN_BACK = "SCREEN_BACK";
     public static final String APP_LIST = "APP_LIST";
     public static final String DEVICE_INFO = "DEVICE_INFO";
     public static final String NETWORK_STATUS = "NETWORK_STATUS";
@@ -28,10 +32,10 @@ public final class AndroidCapabilityRegistry {
     static {
         LinkedHashSet<String> values = new LinkedHashSet<>();
         Collections.addAll(values,
-                SCREEN_READ, APP_LIST, DEVICE_INFO, NETWORK_STATUS,
-                BATTERY_READ, VOLUME_READ, OPEN_APP, MEDIA_PLAY,
-                MEDIA_PAUSE, MEDIA_STOP, VOLUME_SET, FLASHLIGHT_ON,
-                FLASHLIGHT_OFF, SCREEN_CAPTURE);
+                SCREEN_READ, SCREEN_CLICK, SCREEN_SCROLL, SCREEN_TEXT, SCREEN_BACK,
+                APP_LIST, DEVICE_INFO, NETWORK_STATUS, BATTERY_READ, VOLUME_READ,
+                OPEN_APP, MEDIA_PLAY, MEDIA_PAUSE, MEDIA_STOP, VOLUME_SET,
+                FLASHLIGHT_ON, FLASHLIGHT_OFF, SCREEN_CAPTURE);
         ALLOWED = Collections.unmodifiableSet(values);
     }
 
@@ -41,7 +45,5 @@ public final class AndroidCapabilityRegistry {
         return capability != null && ALLOWED.contains(capability);
     }
 
-    public static Set<String> all() {
-        return ALLOWED;
-    }
+    public static Set<String> all() { return ALLOWED; }
 }

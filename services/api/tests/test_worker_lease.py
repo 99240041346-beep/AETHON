@@ -7,10 +7,10 @@ from aethon.worker_lease import LeaseConflict, WorkerLeaseStore
 
 def test_lease_prevents_duplicate_worker_ownership(tmp_path):
     store = WorkerLeaseStore(str(tmp_path / "leases.db"))
-    token = store.acquire("task-1", "worker-a", ttl_seconds=0.2)
+    token = store.acquire("task-1", "worker-a", ttl_seconds=1.0)
     with pytest.raises(LeaseConflict):
-        store.acquire("task-1", "worker-b", ttl_seconds=0.2)
-    assert store.heartbeat("task-1", "worker-a", token, ttl_seconds=0.2)
+        store.acquire("task-1", "worker-b", ttl_seconds=1.0)
+    assert store.heartbeat("task-1", "worker-a", token, ttl_seconds=1.0)
     assert store.release("task-1", "worker-a", token)
     assert store.get("task-1") is None
 

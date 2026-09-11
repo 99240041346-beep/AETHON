@@ -76,6 +76,16 @@ class DeviceGateway:
     MAX_PAYLOAD_BYTES = 8192
     MAX_TTL_SECONDS = 120
     HEARTBEAT_TTL_SECONDS = 120
+    LOW_RISK_CAPABILITIES = {
+        Capability.SCREEN_READ.value,
+        Capability.APP_LIST.value,
+        Capability.DEVICE_INFO.value,
+        Capability.NETWORK_STATUS.value,
+        Capability.BATTERY_READ.value,
+        Capability.VOLUME_READ.value,
+        Capability.APP_OPEN.value,
+        Capability.OPEN_APP.value,
+    }
 
     def __init__(self, safety: SafetyExecutionGate | None = None, registry: DeviceRegistryStore | None = None) -> None:
         self.safety = safety or SafetyExecutionGate(SafetyKernel())
@@ -173,7 +183,7 @@ class DeviceGateway:
             raise GatewayError("device capability not granted")
         if len(str(envelope.payload).encode("utf-8")) > self.MAX_PAYLOAD_BYTES:
             raise GatewayError("command payload too large")
-        risk = RiskClass.LOW if envelope.capability.endswith("_READ") or envelope.capability in {Capability.APP_OPEN.value, Capability.OPEN_APP.value} else RiskClass.MEDIUM
+        risk = RiskClass.LOW if envelope.capability in self.LOW_RISK_CAPABILITIES else RiskClass.MEDIUM
         try:
             decision = self.safety.authorize(risk, side_effects=risk != RiskClass.LOW, approved=envelope.approved)
         except TypeError:

@@ -33,15 +33,48 @@ class AssistantOrchestrator:
 
     _OPEN_APP = re.compile(r"(?:open|launch|start)\s+([a-zA-Z0-9._ -]{2,64})$", re.I)
     _OPEN_APP_TE = re.compile(r"(?:ఓపెన్|తెరువు|ప్రారంభించు)\s+([\w ._-]{2,64})$", re.I)
+    _CLICK = re.compile(r"(?:click|tap|press)\s+(.+)$", re.I)
+    _CLICK_TE = re.compile(r"(?:క్లిక్|ట్యాప్|నొక్కు)\s+(.+)$", re.I)
+    _SCROLL = re.compile(r"(?:scroll|swipe)\s+(up|down|forward|backward)$", re.I)
+    _TEXT = re.compile(r"(?:type|enter|write)\s+(.+?)\s+(?:in|into)\s+(.+)$", re.I)
+    _BACK = re.compile(r"(?:go\s+back|press\s+back|back)$", re.I)
+    _PACKAGES = {
+        "youtube": "com.google.android.youtube",
+        "chrome": "com.android.chrome",
+        "settings": "com.android.settings",
+    }
 
     def classify(self, text: str) -> AssistantIntent:
         value = text.strip()
         lowered = value.lower()
         if not value:
             raise ValueError("assistant input cannot be empty")
+
         match = self._OPEN_APP.search(value) or self._OPEN_APP_TE.search(value)
         if match:
-            return AssistantIntent(AssistantMode.ACTION, value, "android.open_app", {"app": match.group(1).strip()})
+            app = match.group(1).strip()
+            package = self._PACKAGES.get(app.casefold())
+            if package:
+                return AssistantIntent(AssistantMode.ACTION, value, "android.open_app", {"app": app, "package": package})
+
+        match = self._CLICK.search(value) or self._CLICK_TE.search(value)
+        if match:
+            return AssistantIntent(AssistantMode.ACTION, value, "android.screen_click", {"text": match.group(1).strip()}, True)
+
+        match = self._SCROLL.search(value)
+        if match:
+            direction = match.group(1).lower()
+            if direction == "up": direction = "backward"
+            if direction == "down": direction = "forward"
+            return AssistantIntent(AssistantMode.ACTION, value, "android.screen_scroll", {"direction": direction}, True)
+
+        match = self._TEXT.search(value)
+        if match:
+            return AssistantIntent(AssistantMode.ACTION, value, "android.screen_text", {"value": match.group(1), "text": match.group(2).strip()}, True)
+
+        if self._BACK.search(value):
+            return AssistantIntent(AssistantMode.ACTION, value, "android.screen_back", {}, True)
+
         action_words = ("open ", "launch ", "start ", "send ", "call ", "message ", "play ", "stop ", "turn on", "turn off", "ఓపెన్", "తెరువు", "కాల్", "మెసేజ్", "ప్లే", "ఆపు", "ఆన్ చేయి", "ఆఫ్ చేయి")
         if any(lowered.startswith(word.lower()) for word in action_words):
             return AssistantIntent(AssistantMode.ACTION, value, "assistant.action.request", {"command": value}, True)

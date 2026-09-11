@@ -10,15 +10,13 @@ import android.media.AudioManager;
 import android.os.BatteryManager;
 import android.os.Build;
 
+import org.json.JSONObject;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Executes only explicitly allowlisted, bounded Android actions and reports whether
- * the observable result was actually verified. No shell, root, accessibility
- * injection, or arbitrary Intent execution is exposed here.
- */
+/** Executes only explicitly allowlisted, bounded Android actions. */
 public final class AndroidActionExecutor {
     public static final class Result {
         public final boolean accepted;
@@ -26,86 +24,112 @@ public final class AndroidActionExecutor {
         public final String capability;
         public final String message;
         public final Map<String, Object> data;
-
-        private Result(boolean accepted, boolean verified, String capability,
-                       String message, Map<String, Object> data) {
-            this.accepted = accepted;
-            this.verified = verified;
-            this.capability = capability;
-            this.message = message;
+        private Result(boolean accepted, boolean verified, String capability, String message, Map<String, Object> data) {
+            this.accepted = accepted; this.verified = verified; this.capability = capability; this.message = message;
             this.data = data == null ? Collections.emptyMap() : Collections.unmodifiableMap(data);
         }
-
-        static Result rejected(String capability, String message) {
-            return new Result(false, false, capability, message, null);
-        }
-
-        static Result success(String capability, String message, Map<String, Object> data) {
-            return new Result(true, true, capability, message, data);
-        }
-
-        static Result acceptedUnverified(String capability, String message, Map<String, Object> data) {
-            return new Result(true, false, capability, message, data);
-        }
+        static Result rejected(String capability, String message) { return new Result(false, false, capability, message, null); }
+        static Result success(String capability, String message, Map<String, Object> data) { return new Result(true, true, capability, message, data); }
+        static Result acceptedUnverified(String capability, String message, Map<String, Object> data) { return new Result(true, false, capability, message, data); }
     }
 
     private final Context context;
-
-    public AndroidActionExecutor(Context context) {
-        this.context = context.getApplicationContext();
-    }
+    public AndroidActionExecutor(Context context) { this.context = context.getApplicationContext(); }
 
     public Result execute(String capability, Map<String, Object> arguments) {
-        if (!AndroidCapabilityRegistry.isAllowed(capability)) {
-            return Result.rejected(capability, "Capability is not allowlisted");
-        }
+        if (!AndroidCapabilityRegistry.isAllowed(capability)) return Result.rejected(capability, "Capability is not allowlisted");
         Map<String, Object> args = arguments == null ? Collections.emptyMap() : arguments;
         switch (capability) {
-            case AndroidCapabilityRegistry.OPEN_APP:
-                return openApp(stringArg(args, "package_name"));
-            case AndroidCapabilityRegistry.BATTERY_READ:
-                return batteryRead();
-            case AndroidCapabilityRegistry.VOLUME_READ:
-                return volumeRead();
-            case AndroidCapabilityRegistry.VOLUME_SET:
-                return volumeSet(numberArg(args, "level"));
-            case AndroidCapabilityRegistry.FLASHLIGHT_ON:
-                return flashlight(true);
-            case AndroidCapabilityRegistry.FLASHLIGHT_OFF:
-                return flashlight(false);
-            case AndroidCapabilityRegistry.MEDIA_PLAY:
-                return mediaKey(AndroidCapabilityRegistry.MEDIA_PLAY, android.view.KeyEvent.KEYCODE_MEDIA_PLAY);
-            case AndroidCapabilityRegistry.MEDIA_PAUSE:
-                return mediaKey(AndroidCapabilityRegistry.MEDIA_PAUSE, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE);
-            case AndroidCapabilityRegistry.MEDIA_STOP:
-                return mediaKey(AndroidCapabilityRegistry.MEDIA_STOP, android.view.KeyEvent.KEYCODE_MEDIA_STOP);
-            case AndroidCapabilityRegistry.DEVICE_INFO:
-                return deviceInfo();
-            default:
-                return Result.rejected(capability, "Capability is registered but not executable on this Android client yet");
+            case AndroidCapabilityRegistry.SCREEN_READ: return screenRead(args);
+            case AndroidCapabilityRegistry.SCREEN_CLICK: return screenClick(args);
+            case AndroidCapabilityRegistry.SCREEN_SCROLL: return screenScroll(args);
+            case AndroidCapabilityRegistry.SCREEN_TEXT: return screenText(args);
+            case AndroidCapabilityRegistry.SCREEN_BACK: return screenBack();
+            case AndroidCapabilityRegistry.OPEN_APP: return openApp(stringArg(args, "package_name"));
+            case AndroidCapabilityRegistry.BATTERY_READ: return batteryRead();
+            case AndroidCapabilityRegistry.VOLUME_READ: return volumeRead();
+            case AndroidCapabilityRegistry.VOLUME_SET: return volumeSet(numberArg(args, "level"));
+            case AndroidCapabilityRegistry.FLASHLIGHT_ON: return flashlight(true);
+            case AndroidCapabilityRegistry.FLASHLIGHT_OFF: return flashlight(false);
+            case AndroidCapabilityRegistry.MEDIA_PLAY: return mediaKey(AndroidCapabilityRegistry.MEDIA_PLAY, android.view.KeyEvent.KEYCODE_MEDIA_PLAY);
+            case AndroidCapabilityRegistry.MEDIA_PAUSE: return mediaKey(AndroidCapabilityRegistry.MEDIA_PAUSE, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE);
+            case AndroidCapabilityRegistry.MEDIA_STOP: return mediaKey(AndroidCapabilityRegistry.MEDIA_STOP, android.view.KeyEvent.KEYCODE_MEDIA_STOP);
+            case AndroidCapabilityRegistry.DEVICE_INFO: return deviceInfo();
+            default: return Result.rejected(capability, "Capability is registered but not executable on this Android client yet");
         }
+    }
+
+    private Result screenRead(Map<String, Object> args) {
+        int maxNodes = 100;
+        Number requested = args.get("max_nodes") instanceof Number ? (Number) args.get("max_nodes") : numberArg(args, "maxNodes");
+        if (requested != null) maxNodes = Math.max(1, Math.min(250, requested.intValue()));
+        Map<String, Object> data = new HashMap<>(); data.put("connected", UiObservationService.isConnected());
+        data.put("snapshot", UiObservationService.snapshot(maxNodes));
+        if (!UiObservationService.isConnected()) return Result.rejected(AndroidCapabilityRegistry.SCREEN_READ, "Accessibility observation service is not enabled");
+        return Result.success(AndroidCapabilityRegistry.SCREEN_READ, "Active window UI snapshot read", data);
+    }
+
+    private Result screenClick(Map<String, Object> args) {
+        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_CLICK,
+                () -> UiObservationService.click(selector(args, "text"), selector(args, "description"), selector(args, "class_name", "className"), selector(args, "package_name", "packageName")), "UI click");
+    }
+
+    private Result screenScroll(Map<String, Object> args) {
+        Object direction = args.get("direction");
+        boolean forward = direction == null ? booleanArg(args, "forward", true) : "forward".equalsIgnoreCase(String.valueOf(direction));
+        if (direction != null && !forward && !"backward".equalsIgnoreCase(String.valueOf(direction))) return Result.rejected(AndroidCapabilityRegistry.SCREEN_SCROLL, "direction must be forward or backward");
+        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_SCROLL,
+                () -> UiObservationService.scroll(selector(args, "text"), selector(args, "description"), selector(args, "class_name", "className"), selector(args, "package_name", "packageName"), forward), "UI scroll");
+    }
+
+    private Result screenText(Map<String, Object> args) {
+        String value = selector(args, "value");
+        if (value == null || value.length() > 2000) return Result.rejected(AndroidCapabilityRegistry.SCREEN_TEXT, "value is required and must be at most 2000 characters");
+        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_TEXT,
+                () -> UiObservationService.setText(selector(args, "text"), selector(args, "description"), selector(args, "class_name", "className"), selector(args, "package_name", "packageName"), value), "UI text entry");
+    }
+
+    private Result screenBack() {
+        if (!UiObservationService.isConnected()) return Result.rejected(AndroidCapabilityRegistry.SCREEN_BACK, "Accessibility observation service is not enabled");
+        JSONObject before = UiObservationService.snapshot(250);
+        JSONObject action = UiObservationService.back();
+        JSONObject after = UiObservationService.snapshot(250);
+        return observedResult(AndroidCapabilityRegistry.SCREEN_BACK, action, before, after, "Back navigation");
+    }
+
+    private interface UiAction { JSONObject run(); }
+
+    private Result executeObservedUiAction(String capability, UiAction action, String description) {
+        if (!UiObservationService.isConnected()) return Result.rejected(capability, "Accessibility observation service is not enabled");
+        JSONObject before = UiObservationService.snapshot(250);
+        if (!before.optBoolean("connected", false)) return Result.rejected(capability, "Unable to observe active UI before action");
+        JSONObject actionResult = action.run();
+        JSONObject after = UiObservationService.snapshot(250);
+        return observedResult(capability, actionResult, before, after, description);
+    }
+
+    private Result observedResult(String capability, JSONObject actionResult, JSONObject before, JSONObject after, String action) {
+        boolean success = actionResult.optBoolean("success", false);
+        boolean postObserved = after.optBoolean("connected", false) && !after.has("error");
+        Map<String, Object> data = new HashMap<>();
+        data.put("result", actionResult.toString());
+        data.put("pre_snapshot", before.toString());
+        data.put("post_snapshot", after.toString());
+        if (!success) return Result.rejected(capability, actionResult.optString("message", action + " rejected"));
+        // This verifies that Android accepted the action and the UI remained observable.
+        // Workflow-level state verification is still performed by the following SCREEN_READ step.
+        return postObserved
+                ? Result.success(capability, action + " executed and post-action UI observed", data)
+                : Result.acceptedUnverified(capability, action + " executed but post-action UI could not be observed", data);
     }
 
     private Result openApp(String packageName) {
-        if (packageName == null || packageName.length() > 200 || packageName.indexOf(' ') >= 0) {
-            return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Invalid package name");
-        }
-        PackageManager pm = context.getPackageManager();
-        Intent launch = pm.getLaunchIntentForPackage(packageName);
-        if (launch == null) {
-            return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Application is not installed or launchable");
-        }
+        if (packageName == null || packageName.length() > 200 || packageName.indexOf(' ') >= 0) return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Invalid package name");
+        PackageManager pm = context.getPackageManager(); Intent launch = pm.getLaunchIntentForPackage(packageName);
+        if (launch == null) return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Application is not installed or launchable");
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        try {
-            context.startActivity(launch);
-        } catch (RuntimeException ex) {
-            return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Android rejected app launch");
-        }
-        Map<String, Object> data = new HashMap<>();
-        data.put("package_name", packageName);
-        data.put("launch_intent_available", true);
-        // Package launchability is verified; foreground visibility is intentionally
-        // left to the future device observation channel.
+        try { context.startActivity(launch); } catch (RuntimeException ex) { return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Android rejected app launch"); }
+        Map<String, Object> data = new HashMap<>(); data.put("package_name", packageName); data.put("launch_intent_available", true);
         return Result.success(AndroidCapabilityRegistry.OPEN_APP, "Application launch requested", data);
     }
 
@@ -114,19 +138,14 @@ public final class AndroidActionExecutor {
         if (bm == null) return Result.rejected(AndroidCapabilityRegistry.BATTERY_READ, "Battery service unavailable");
         int level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
         if (level < 0 || level > 100) return Result.rejected(AndroidCapabilityRegistry.BATTERY_READ, "Battery level unavailable");
-        Map<String, Object> data = new HashMap<>();
-        data.put("percent", level);
-        return Result.success(AndroidCapabilityRegistry.BATTERY_READ, "Battery level read", data);
+        Map<String, Object> data = new HashMap<>(); data.put("percent", level); return Result.success(AndroidCapabilityRegistry.BATTERY_READ, "Battery level read", data);
     }
 
     private Result volumeRead() {
         AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
         if (audio == null) return Result.rejected(AndroidCapabilityRegistry.VOLUME_READ, "Audio service unavailable");
-        int stream = AudioManager.STREAM_MUSIC;
-        Map<String, Object> data = new HashMap<>();
-        data.put("stream", "music");
-        data.put("level", audio.getStreamVolume(stream));
-        data.put("max", audio.getStreamMaxVolume(stream));
+        int stream = AudioManager.STREAM_MUSIC; Map<String, Object> data = new HashMap<>();
+        data.put("stream", "music"); data.put("level", audio.getStreamVolume(stream)); data.put("max", audio.getStreamMaxVolume(stream));
         return Result.success(AndroidCapabilityRegistry.VOLUME_READ, "Music volume read", data);
     }
 
@@ -134,43 +153,27 @@ public final class AndroidActionExecutor {
         if (requested == null) return Result.rejected(AndroidCapabilityRegistry.VOLUME_SET, "Volume level is required");
         AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
         if (audio == null) return Result.rejected(AndroidCapabilityRegistry.VOLUME_SET, "Audio service unavailable");
-        int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-        int level = Math.max(0, Math.min(max, requested.intValue()));
-        audio.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0);
-        boolean verified = audio.getStreamVolume(AudioManager.STREAM_MUSIC) == level;
+        int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC); int level = Math.max(0, Math.min(max, requested.intValue()));
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0); boolean verified = audio.getStreamVolume(AudioManager.STREAM_MUSIC) == level;
         if (!verified) return Result.rejected(AndroidCapabilityRegistry.VOLUME_SET, "Volume change could not be verified");
-        Map<String, Object> data = new HashMap<>();
-        data.put("level", level);
-        data.put("max", max);
-        return Result.success(AndroidCapabilityRegistry.VOLUME_SET, "Music volume updated", data);
+        Map<String, Object> data = new HashMap<>(); data.put("level", level); data.put("max", max); return Result.success(AndroidCapabilityRegistry.VOLUME_SET, "Music volume updated", data);
     }
 
     private Result flashlight(boolean enabled) {
         String capability = enabled ? AndroidCapabilityRegistry.FLASHLIGHT_ON : AndroidCapabilityRegistry.FLASHLIGHT_OFF;
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            return Result.rejected(capability, "Flashlight control requires Android 6.0 or newer");
-        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return Result.rejected(capability, "Flashlight control requires Android 6.0 or newer");
         CameraManager camera = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
         if (camera == null) return Result.rejected(capability, "Camera service unavailable");
         try {
             String selected = null;
             for (String id : camera.getCameraIdList()) {
-                CameraCharacteristics characteristics = camera.getCameraCharacteristics(id);
-                Boolean flash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
-                if (Boolean.TRUE.equals(flash)) {
-                    selected = id;
-                    break;
-                }
+                Boolean flash = camera.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                if (Boolean.TRUE.equals(flash)) { selected = id; break; }
             }
             if (selected == null) return Result.rejected(capability, "No camera with flash is available");
-            camera.setTorchMode(selected, enabled);
-            Map<String, Object> data = new HashMap<>();
-            data.put("enabled", enabled);
-            data.put("camera_id", selected);
+            camera.setTorchMode(selected, enabled); Map<String, Object> data = new HashMap<>(); data.put("enabled", enabled); data.put("camera_id", selected);
             return Result.success(capability, enabled ? "Flashlight enabled" : "Flashlight disabled", data);
-        } catch (CameraAccessException | SecurityException ex) {
-            return Result.rejected(capability, "Flashlight action was rejected");
-        }
+        } catch (CameraAccessException | SecurityException ex) { return Result.rejected(capability, "Flashlight action was rejected"); }
     }
 
     private Result mediaKey(String capability, int keyCode) {
@@ -178,28 +181,23 @@ public final class AndroidActionExecutor {
         if (audio == null) return Result.rejected(capability, "Audio service unavailable");
         audio.dispatchMediaKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, keyCode));
         audio.dispatchMediaKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, keyCode));
-        Map<String, Object> data = new HashMap<>();
-        data.put("key_code", keyCode);
-        // Dispatch is not proof that playback changed. Keep it explicitly unverified.
+        Map<String, Object> data = new HashMap<>(); data.put("key_code", keyCode);
         return Result.acceptedUnverified(capability, "Media key dispatched; playback requires observation verification", data);
     }
 
     private Result deviceInfo() {
-        Map<String, Object> data = new HashMap<>();
-        data.put("manufacturer", Build.MANUFACTURER);
-        data.put("model", Build.MODEL);
-        data.put("android_version", Build.VERSION.RELEASE);
-        data.put("sdk", Build.VERSION.SDK_INT);
-        return Result.success(AndroidCapabilityRegistry.DEVICE_INFO, "Device information read", data);
+        Map<String, Object> data = new HashMap<>(); data.put("manufacturer", Build.MANUFACTURER); data.put("model", Build.MODEL);
+        data.put("android_version", Build.VERSION.RELEASE); data.put("sdk", Build.VERSION.SDK_INT); return Result.success(AndroidCapabilityRegistry.DEVICE_INFO, "Device information read", data);
     }
 
-    private static String stringArg(Map<String, Object> args, String key) {
-        Object value = args.get(key);
-        return value instanceof String ? (String) value : null;
+    private static String selector(Map<String, Object> args, String... keys) {
+        for (String key : keys) {
+            Object value = args.get(key);
+            if (value instanceof String && !((String) value).trim().isEmpty()) return (String) value;
+        }
+        return null;
     }
-
-    private static Number numberArg(Map<String, Object> args, String key) {
-        Object value = args.get(key);
-        return value instanceof Number ? (Number) value : null;
-    }
+    private static String stringArg(Map<String, Object> args, String key) { Object value = args.get(key); return value instanceof String ? (String) value : null; }
+    private static Number numberArg(Map<String, Object> args, String key) { Object value = args.get(key); return value instanceof Number ? (Number) value : null; }
+    private static boolean booleanArg(Map<String, Object> args, String key, boolean fallback) { Object value = args.get(key); return value instanceof Boolean ? (Boolean) value : fallback; }
 }
