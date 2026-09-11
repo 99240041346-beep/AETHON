@@ -10,6 +10,8 @@ import android.media.AudioManager;
 import android.os.BatteryManager;
 import android.os.Build;
 
+import org.json.JSONObject;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -39,6 +41,10 @@ public final class AndroidActionExecutor {
         Map<String, Object> args = arguments == null ? Collections.emptyMap() : arguments;
         switch (capability) {
             case AndroidCapabilityRegistry.SCREEN_READ: return screenRead(args);
+            case AndroidCapabilityRegistry.SCREEN_CLICK: return screenClick(args);
+            case AndroidCapabilityRegistry.SCREEN_SCROLL: return screenScroll(args);
+            case AndroidCapabilityRegistry.SCREEN_TEXT: return screenText(args);
+            case AndroidCapabilityRegistry.SCREEN_BACK: return screenBack();
             case AndroidCapabilityRegistry.OPEN_APP: return openApp(stringArg(args, "package_name"));
             case AndroidCapabilityRegistry.BATTERY_READ: return batteryRead();
             case AndroidCapabilityRegistry.VOLUME_READ: return volumeRead();
@@ -57,17 +63,43 @@ public final class AndroidActionExecutor {
         int maxNodes = 100;
         Number requested = numberArg(args, "max_nodes");
         if (requested != null) maxNodes = Math.max(1, Math.min(250, requested.intValue()));
-        Map<String, Object> data = new HashMap<>();
-        data.put("connected", UiObservationService.isConnected());
+        Map<String, Object> data = new HashMap<>(); data.put("connected", UiObservationService.isConnected());
         data.put("snapshot", UiObservationService.snapshot(maxNodes));
         if (!UiObservationService.isConnected()) return Result.rejected(AndroidCapabilityRegistry.SCREEN_READ, "Accessibility observation service is not enabled");
         return Result.success(AndroidCapabilityRegistry.SCREEN_READ, "Active window UI snapshot read", data);
     }
 
+    private Result screenClick(Map<String, Object> args) {
+        return uiResult(AndroidCapabilityRegistry.SCREEN_CLICK, UiObservationService.click(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name")), "UI click");
+    }
+
+    private Result screenScroll(Map<String, Object> args) {
+        Object direction = args.get("direction");
+        boolean forward = direction == null || "forward".equalsIgnoreCase(String.valueOf(direction));
+        if (!forward && !"backward".equalsIgnoreCase(String.valueOf(direction))) return Result.rejected(AndroidCapabilityRegistry.SCREEN_SCROLL, "direction must be forward or backward");
+        return uiResult(AndroidCapabilityRegistry.SCREEN_SCROLL, UiObservationService.scroll(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name"), forward), "UI scroll");
+    }
+
+    private Result screenText(Map<String, Object> args) {
+        String value = selector(args, "value");
+        if (value == null || value.length() > 2000) return Result.rejected(AndroidCapabilityRegistry.SCREEN_TEXT, "value is required and must be at most 2000 characters");
+        return uiResult(AndroidCapabilityRegistry.SCREEN_TEXT, UiObservationService.setText(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name"), value), "UI text entry");
+    }
+
+    private Result screenBack() {
+        return uiResult(AndroidCapabilityRegistry.SCREEN_BACK, UiObservationService.back(), "Back navigation");
+    }
+
+    private Result uiResult(String capability, JSONObject result, String action) {
+        boolean success = result.optBoolean("success", false);
+        Map<String, Object> data = new HashMap<>(); data.put("result", result.toString());
+        if (!success) return Result.rejected(capability, result.optString("message", action + " rejected"));
+        return Result.acceptedUnverified(capability, action + " requested; re-read SCREEN_READ to verify state", data);
+    }
+
     private Result openApp(String packageName) {
         if (packageName == null || packageName.length() > 200 || packageName.indexOf(' ') >= 0) return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Invalid package name");
-        PackageManager pm = context.getPackageManager();
-        Intent launch = pm.getLaunchIntentForPackage(packageName);
+        PackageManager pm = context.getPackageManager(); Intent launch = pm.getLaunchIntentForPackage(packageName);
         if (launch == null) return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Application is not installed or launchable");
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try { context.startActivity(launch); } catch (RuntimeException ex) { return Result.rejected(AndroidCapabilityRegistry.OPEN_APP, "Android rejected app launch"); }
@@ -80,8 +112,7 @@ public final class AndroidActionExecutor {
         if (bm == null) return Result.rejected(AndroidCapabilityRegistry.BATTERY_READ, "Battery service unavailable");
         int level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
         if (level < 0 || level > 100) return Result.rejected(AndroidCapabilityRegistry.BATTERY_READ, "Battery level unavailable");
-        Map<String, Object> data = new HashMap<>(); data.put("percent", level);
-        return Result.success(AndroidCapabilityRegistry.BATTERY_READ, "Battery level read", data);
+        Map<String, Object> data = new HashMap<>(); data.put("percent", level); return Result.success(AndroidCapabilityRegistry.BATTERY_READ, "Battery level read", data);
     }
 
     private Result volumeRead() {
@@ -99,8 +130,7 @@ public final class AndroidActionExecutor {
         int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC); int level = Math.max(0, Math.min(max, requested.intValue()));
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0); boolean verified = audio.getStreamVolume(AudioManager.STREAM_MUSIC) == level;
         if (!verified) return Result.rejected(AndroidCapabilityRegistry.VOLUME_SET, "Volume change could not be verified");
-        Map<String, Object> data = new HashMap<>(); data.put("level", level); data.put("max", max);
-        return Result.success(AndroidCapabilityRegistry.VOLUME_SET, "Music volume updated", data);
+        Map<String, Object> data = new HashMap<>(); data.put("level", level); data.put("max", max); return Result.success(AndroidCapabilityRegistry.VOLUME_SET, "Music volume updated", data);
     }
 
     private Result flashlight(boolean enabled) {
@@ -131,10 +161,12 @@ public final class AndroidActionExecutor {
 
     private Result deviceInfo() {
         Map<String, Object> data = new HashMap<>(); data.put("manufacturer", Build.MANUFACTURER); data.put("model", Build.MODEL);
-        data.put("android_version", Build.VERSION.RELEASE); data.put("sdk", Build.VERSION.SDK_INT);
-        return Result.success(AndroidCapabilityRegistry.DEVICE_INFO, "Device information read", data);
+        data.put("android_version", Build.VERSION.RELEASE); data.put("sdk", Build.VERSION.SDK_INT); return Result.success(AndroidCapabilityRegistry.DEVICE_INFO, "Device information read", data);
     }
 
+    private static String selector(Map<String, Object> args, String key) {
+        Object value = args.get(key); return value instanceof String && !((String) value).trim().isEmpty() ? (String) value : null;
+    }
     private static String stringArg(Map<String, Object> args, String key) { Object value = args.get(key); return value instanceof String ? (String) value : null; }
     private static Number numberArg(Map<String, Object> args, String key) { Object value = args.get(key); return value instanceof Number ? (Number) value : null; }
 }
