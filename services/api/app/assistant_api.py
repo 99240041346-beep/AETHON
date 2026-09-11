@@ -173,23 +173,59 @@ def resume_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
         if workflow is None:
             raise HTTPException(404, "workflow not found")
         latest = transport.get(command_id=workflow["command_id"], owner_id=owner_id)
+        resumed_workflow = workflow.get("workflow") or {}
+        steps = resumed_workflow.get("steps", [])
+        next_index = resumed_workflow.get("next_index")
         next_command = None
+        if not isinstance(steps, list) or not isinstance(next_index, int):
+            raise HTTPException(409, "workflow state is invalid")
+
+        # The latest ACCEPTED command may be unclaimed or in-flight. It already
+        # represents the durable next step, so resume must not duplicate it.
+        if latest and latest.get("status") == "ACCEPTED":
+            return {"ok": True, "workflow": workflow, "state": "RUNNING", "next": None, "message": "Workflow resumed; existing step remains queued or in flight."}
+
         if latest and latest.get("status") == "COMPLETED":
-            resumed_workflow = workflow.get("workflow") or {}
-            steps = resumed_workflow.get("steps", [])
-            index = resumed_workflow.get("next_index")
-            if isinstance(steps, list) and isinstance(index, int) and index < len(steps):
-                step = steps[index]
-                capability = step.get("capability") if isinstance(step, dict) else None
-                arguments = step.get("arguments", {}) if isinstance(step, dict) else {}
-                if capability not in {"SCREEN_READ", "SCREEN_CLICK", "SCREEN_SCROLL", "SCREEN_TEXT", "SCREEN_BACK", "APP_LIST", "DEVICE_INFO", "NETWORK_STATUS", "BATTERY_READ", "VOLUME_READ", "OPEN_APP", "MEDIA_PLAY", "MEDIA_PAUSE", "MEDIA_STOP", "VOLUME_SET", "FLASHLIGHT_ON", "FLASHLIGHT_OFF", "SCREEN_CAPTURE"} or not isinstance(arguments, dict):
-                    raise HTTPException(409, "workflow contains an invalid next capability")
-                next_workflow = {**resumed_workflow, "next_index": index + 1, "state": "RUNNING"}
-                queued = transport.enqueue(owner_id=owner_id, device_id=latest["device_id"], capability=capability, arguments={**arguments, "_workflow": next_workflow}, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=15)
-                next_command = {"command_id": queued.command_id, "step_index": index, "step_count": len(steps), "capability": capability, "status": queued.status}
+            index = next_index
+            if index >= len(steps):
+                workflow = transport.set_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state="COMPLETED") or workflow
+            else:
+                pending = transport.workflow_step_pending(workflow_id=workflow_id, owner_id=owner_id, step_index=index)
+                if pending:
+                    next_command = {"command_id": pending["command_id"], "step_index": index, "step_count": len(steps), "capability": pending["capability"], "status": pending["status"]}
+                else:
+                    step = steps[index]
+                    capability = step.get("capability") if isinstance(step, dict) else None
+                    arguments = step.get("arguments", {}) if isinstance(step, dict) else {}
+                    if capability not in {"SCREEN_READ", "SCREEN_CLICK", "SCREEN_SCROLL", "SCREEN_TEXT", "SCREEN_BACK", "APP_LIST", "DEVICE_INFO", "NETWORK_STATUS", "BATTERY_READ", "VOLUME_READ", "OPEN_APP", "MEDIA_PLAY", "MEDIA_PAUSE", "MEDIA_STOP", "VOLUME_SET", "FLASHLIGHT_ON", "FLASHLIGHT_OFF", "SCREEN_CAPTURE"} or not isinstance(arguments, dict):
+                        raise HTTPException(409, "workflow contains an invalid next capability")
+                    next_workflow = {**resumed_workflow, "next_index": index + 1, "state": "RUNNING"}
+                    queued = transport.enqueue(owner_id=owner_id, device_id=latest["device_id"], capability=capability, arguments={**arguments, "_workflow": next_workflow}, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=15)
+                    next_command = {"command_id": queued.command_id, "step_index": index, "step_count": len(steps), "capability": capability, "status": queued.status}
+        elif latest and latest.get("status") in {"EXPIRED", "REJECTED"}:
+            index = max(0, next_index - 1)
+            if index < len(steps):
+                decision_workflow = {**resumed_workflow, "state": "RUNNING"}
+                decision = __import__("app.android_workflow_recovery", fromlist=["decide_retry"]).decide_retry(decision_workflow, step_index=index, success=False, verified=False)
+                if decision.retry:
+                    from app.android_workflow_recovery import with_attempt
+                    retry_workflow = with_attempt(decision_workflow, step_index=index, attempt=decision.attempt)
+                    pending = transport.workflow_step_pending(workflow_id=workflow_id, owner_id=owner_id, step_index=index)
+                    if pending:
+                        next_command = {"command_id": pending["command_id"], "step_index": index, "step_count": len(steps), "capability": pending["capability"], "status": pending["status"]}
+                    else:
+                        step = steps[index]
+                        capability = step.get("capability") if isinstance(step, dict) else None
+                        arguments = step.get("arguments", {}) if isinstance(step, dict) else {}
+                        if capability not in {"SCREEN_READ", "SCREEN_CLICK", "SCREEN_SCROLL", "SCREEN_TEXT", "SCREEN_BACK", "OPEN_APP"} or not isinstance(arguments, dict):
+                            raise HTTPException(409, "workflow retry contains an invalid capability")
+                        queued = transport.enqueue(owner_id=owner_id, device_id=latest["device_id"], capability=capability, arguments={**arguments, "_workflow": retry_workflow}, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=15)
+                        next_command = {"command_id": queued.command_id, "step_index": index, "step_count": len(steps), "capability": capability, "status": queued.status}
+                else:
+                    workflow = transport.set_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state="FAILED") or workflow
+        return {"ok": True, "workflow": workflow, "state": workflow.get("workflow", {}).get("state", "RUNNING"), "next": next_command, "message": "Workflow resumed."}
     except CommandTransportError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"ok": True, "workflow": workflow, "state": "RUNNING", "next": next_command, "message": "Workflow resumed."}
 
 @router.get("/sessions")
 def sessions(limit: int = 50, owner_id: str = Depends(owner)) -> list[dict]:
@@ -208,7 +244,6 @@ def session(session_id: str, owner_id: str = Depends(owner)) -> dict:
 def history(session_id: str, limit: int = 50, owner_id: str = Depends(owner)) -> list[dict]:
     try: return repository.history(session_id, owner_id, limit)
     except ValueError as exc: raise HTTPException(400, "invalid session id") from exc
-    except Exception as exc: raise HTTPException(503, "assistant persistence unavailable") from exc
 
 @router.delete("/sessions/{session_id}")
 def archive_session(session_id: str, owner_id: str = Depends(owner)) -> dict:
