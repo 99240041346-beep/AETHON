@@ -70,31 +70,52 @@ public final class AndroidActionExecutor {
     }
 
     private Result screenClick(Map<String, Object> args) {
-        return uiResult(AndroidCapabilityRegistry.SCREEN_CLICK, UiObservationService.click(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name")), "UI click");
+        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_CLICK, args,
+                () -> UiObservationService.click(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name")), "UI click");
     }
 
     private Result screenScroll(Map<String, Object> args) {
         Object direction = args.get("direction");
         boolean forward = direction == null || "forward".equalsIgnoreCase(String.valueOf(direction));
         if (!forward && !"backward".equalsIgnoreCase(String.valueOf(direction))) return Result.rejected(AndroidCapabilityRegistry.SCREEN_SCROLL, "direction must be forward or backward");
-        return uiResult(AndroidCapabilityRegistry.SCREEN_SCROLL, UiObservationService.scroll(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name"), forward), "UI scroll");
+        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_SCROLL, args,
+                () -> UiObservationService.scroll(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name"), forward), "UI scroll");
     }
 
     private Result screenText(Map<String, Object> args) {
         String value = selector(args, "value");
         if (value == null || value.length() > 2000) return Result.rejected(AndroidCapabilityRegistry.SCREEN_TEXT, "value is required and must be at most 2000 characters");
-        return uiResult(AndroidCapabilityRegistry.SCREEN_TEXT, UiObservationService.setText(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name"), value), "UI text entry");
+        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_TEXT, args,
+                () -> UiObservationService.setText(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name"), value), "UI text entry");
     }
 
     private Result screenBack() {
-        return uiResult(AndroidCapabilityRegistry.SCREEN_BACK, UiObservationService.back(), "Back navigation");
+        if (!UiObservationService.isConnected()) return Result.rejected(AndroidCapabilityRegistry.SCREEN_BACK, "Accessibility observation service is not enabled");
+        JSONObject before = UiObservationService.snapshot(250);
+        JSONObject action = UiObservationService.back();
+        JSONObject after = UiObservationService.snapshot(250);
+        return observedResult(AndroidCapabilityRegistry.SCREEN_BACK, action, before, after, "Back navigation");
     }
 
-    private Result uiResult(String capability, JSONObject result, String action) {
-        boolean success = result.optBoolean("success", false);
-        Map<String, Object> data = new HashMap<>(); data.put("result", result.toString());
-        if (!success) return Result.rejected(capability, result.optString("message", action + " rejected"));
-        return Result.acceptedUnverified(capability, action + " requested; re-read SCREEN_READ to verify state", data);
+    private interface UiAction { JSONObject run(); }
+
+    private Result executeObservedUiAction(String capability, Map<String, Object> args, UiAction action, String description) {
+        if (!UiObservationService.isConnected()) return Result.rejected(capability, "Accessibility observation service is not enabled");
+        JSONObject before = UiObservationService.snapshot(250);
+        if (!before.optBoolean("connected", false)) return Result.rejected(capability, "Unable to observe active UI before action");
+        JSONObject actionResult = action.run();
+        JSONObject after = UiObservationService.snapshot(250);
+        return observedResult(capability, actionResult, before, after, description);
+    }
+
+    private Result observedResult(String capability, JSONObject actionResult, JSONObject before, JSONObject after, String action) {
+        boolean success = actionResult.optBoolean("success", false);
+        Map<String, Object> data = new HashMap<>();
+        data.put("result", actionResult.toString());
+        data.put("pre_snapshot", before.toString());
+        data.put("post_snapshot", after.toString());
+        if (!success) return Result.rejected(capability, actionResult.optString("message", action + " rejected"));
+        return Result.acceptedUnverified(capability, action + " requested; post-action UI snapshot attached for verification", data);
     }
 
     private Result openApp(String packageName) {
