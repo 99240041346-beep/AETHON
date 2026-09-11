@@ -25,8 +25,9 @@ class PersistedCommand:
     status: str
 
 class AndroidCommandTransport:
-    """PostgreSQL-backed command queue with single-claim delivery and result verification."""
+    """PostgreSQL-backed command queue with single-claim delivery and durable workflow state."""
     MAX_TTL_SECONDS = 30
+    WORKFLOW_STATES = {"RUNNING", "PAUSED", "CANCELLED", "COMPLETED", "FAILED"}
 
     def __init__(self, database_url: str | None = None):
         self.store = PostgresStore(database_url)
@@ -60,6 +61,7 @@ class AndroidCommandTransport:
                    SELECT command_id FROM device_commands
                    WHERE device_id=%s AND owner_id=%s AND status='ACCEPTED'
                      AND expires_at>%s AND claimed_at IS NULL
+                     AND COALESCE(arguments_json->'_workflow'->>'state','RUNNING')='RUNNING'
                    ORDER BY issued_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
                )
                UPDATE device_commands AS dc SET claimed_at=NOW()
@@ -77,7 +79,7 @@ class AndroidCommandTransport:
         return len(rows)
 
     def cancel(self, *, command_id: str, owner_id: str) -> bool:
-        rows = self.store.execute("""UPDATE device_commands SET status='CANCELLED', completed_at=NOW(), error='cancelled by owner' WHERE command_id=%s AND owner_id=%s AND status='ACCEPTED' RETURNING command_id""", (command_id, owner_id))
+        rows = self.store.execute("""UPDATE device_commands SET status='CANCELLED', completed_at=NOW(), error='cancelled by owner' WHERE command_id=%s AND owner_id=%s AND status='ACCEPTED' AND claimed_at IS NULL RETURNING command_id""", (command_id, owner_id))
         return bool(rows)
 
     def record_result(self, *, command_id: str, device_id: str, owner_id: str, success: bool, verified: bool, result: dict[str, Any] | None = None, verification: dict[str, Any] | None = None, error: str | None = None) -> dict[str, Any]:
@@ -99,3 +101,37 @@ class AndroidCommandTransport:
         arguments = r[11] if isinstance(r[11], dict) else (json.loads(r[11]) if r[11] else {})
         arguments.pop("_approved", None)
         return {"command_id": str(r[0]), "owner_id": r[1], "device_id": r[2], "capability": r[3], "status": r[4], "verified": bool(r[5]), "error": r[6], "issued_at": r[7].isoformat(), "expires_at": r[8].isoformat(), "claimed_at": r[9].isoformat() if r[9] else None, "completed_at": r[10].isoformat() if r[10] else None, "arguments": arguments, "result": r[12] if isinstance(r[12], dict) else (json.loads(r[12]) if r[12] else None), "verification": r[13] if isinstance(r[13], dict) else (json.loads(r[13]) if r[13] else None)}
+
+    def _workflow_row(self, *, workflow_id: str, owner_id: str) -> dict[str, Any] | None:
+        rows = self.store.execute(
+            """SELECT command_id,owner_id,device_id,capability,status,arguments_json,issued_at
+               FROM device_commands
+               WHERE owner_id=%s AND arguments_json->'_workflow'->>'id'=%s
+               ORDER BY issued_at DESC LIMIT 1""",
+            (owner_id, workflow_id),
+        )
+        if not rows:
+            return None
+        r = rows[0]
+        args = r[5] if isinstance(r[5], dict) else json.loads(r[5] or "{}")
+        workflow = args.get("_workflow") if isinstance(args.get("_workflow"), dict) else None
+        return {"command_id": str(r[0]), "owner_id": r[1], "device_id": r[2], "capability": r[3], "status": r[4], "workflow": workflow, "issued_at": r[6].isoformat()}
+
+    def workflow(self, *, workflow_id: str, owner_id: str) -> dict[str, Any] | None:
+        return self._workflow_row(workflow_id=workflow_id, owner_id=owner_id)
+
+    def set_workflow_state(self, *, workflow_id: str, owner_id: str, state: str) -> dict[str, Any] | None:
+        if state not in self.WORKFLOW_STATES:
+            raise CommandTransportError("invalid workflow state")
+        row = self._workflow_row(workflow_id=workflow_id, owner_id=owner_id)
+        if row is None or not isinstance(row.get("workflow"), dict):
+            return None
+        workflow = dict(row["workflow"]); workflow["state"] = state
+        self.store.execute(
+            """UPDATE device_commands SET arguments_json=jsonb_set(arguments_json,'{_workflow}',%s::jsonb)
+               WHERE owner_id=%s AND arguments_json->'_workflow'->>'id'=%s""",
+            (json.dumps(workflow), owner_id, workflow_id),
+        )
+        if state == "CANCELLED":
+            self.store.execute("""UPDATE device_commands SET status='CANCELLED', completed_at=NOW(), error='workflow cancelled by owner' WHERE owner_id=%s AND arguments_json->'_workflow'->>'id'=%s AND status='ACCEPTED' AND claimed_at IS NULL""", (owner_id, workflow_id))
+        return self._workflow_row(workflow_id=workflow_id, owner_id=owner_id)
