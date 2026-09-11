@@ -39,13 +39,13 @@ class AndroidWorkflowPlanner:
 
     def _open_and_click(self, app: str, target: str) -> list[AndroidWorkflowStep]:
         package, label = self.APP_PACKAGES[app]
-        return [AndroidWorkflowStep("OPEN_APP", {"package": package, "app": label}), self._read(), AndroidWorkflowStep("SCREEN_CLICK", self._selector(target)), self._read()]
+        return [AndroidWorkflowStep("OPEN_APP", {"package_name": package, "app": label}), self._read(), AndroidWorkflowStep("SCREEN_CLICK", self._selector(target)), self._read()]
 
     def _open_and_type(self, app: str, target: str, value: str) -> list[AndroidWorkflowStep]:
         package, label = self.APP_PACKAGES[app]
         if not value or len(value) > 2000:
             raise ValueError("text input is invalid or too long")
-        return [AndroidWorkflowStep("OPEN_APP", {"package": package, "app": label}), self._read(), AndroidWorkflowStep("SCREEN_TEXT", {**self._selector(target), "value": value}), self._read()]
+        return [AndroidWorkflowStep("OPEN_APP", {"package_name": package, "app": label}), self._read(), AndroidWorkflowStep("SCREEN_TEXT", {**self._selector(target), "value": value}), self._read()]
 
     def plan(self, text: str) -> list[AndroidWorkflowStep]:
         value = text.strip()
@@ -54,7 +54,7 @@ class AndroidWorkflowPlanner:
             raise ValueError("workflow text cannot be empty")
         if "settings" in lower and any(term in lower for term in ("wi-fi", "wifi", "wi fi")):
             return [
-                AndroidWorkflowStep("OPEN_APP", {"package": "com.android.settings", "app": "Settings"}),
+                AndroidWorkflowStep("OPEN_APP", {"package_name": "com.android.settings", "app": "Settings"}),
                 AndroidWorkflowStep("SCREEN_READ", {"maxNodes": 250}, {"contains_any": ["Wi-Fi", "Wi-Fi and internet", "Network & internet"]}),
                 AndroidWorkflowStep("SCREEN_CLICK", {"text": "Wi-Fi"}),
                 AndroidWorkflowStep("SCREEN_READ", {"maxNodes": 250}, {"contains_any": ["Wi-Fi", "Wi-Fi network"]}),
@@ -82,12 +82,12 @@ class AndroidWorkflowPlanner:
                 raise ValueError("workflow contains an unsupported capability")
             if not isinstance(step.arguments, dict):
                 raise ValueError("workflow arguments must be an object")
-            for key in ("text", "description", "className", "packageName"):
+            for key in ("text", "description", "className", "class_name", "packageName", "package_name"):
                 value = step.arguments.get(key)
                 if value is not None and (not isinstance(value, str) or len(value) > MAX_SELECTOR_LENGTH):
                     raise ValueError("workflow selector is invalid or too long")
             if step.capability == "SCREEN_READ":
-                max_nodes = step.arguments.get("maxNodes", 250)
+                max_nodes = step.arguments.get("maxNodes", step.arguments.get("max_nodes", 250))
                 if not isinstance(max_nodes, int) or not 1 <= max_nodes <= 250:
                     raise ValueError("SCREEN_READ maxNodes must be between 1 and 250")
             if step.capability == "SCREEN_TEXT":
