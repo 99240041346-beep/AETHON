@@ -166,15 +166,30 @@ def resume_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
         current = transport.workflow(workflow_id=workflow_id, owner_id=owner_id)
         if current is None or not isinstance(current.get("workflow"), dict):
             raise HTTPException(404, "workflow not found")
-        state = current["workflow"].get("state", "RUNNING")
-        if state != "PAUSED":
-            raise HTTPException(409, f"workflow is {state.lower()}, not paused")
+        wf = current["workflow"]
+        if wf.get("state", "RUNNING") != "PAUSED":
+            raise HTTPException(409, f"workflow is {str(wf.get('state', 'RUNNING')).lower()}, not paused")
         workflow = transport.set_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state="RUNNING")
+        if workflow is None:
+            raise HTTPException(404, "workflow not found")
+        latest = transport.get(command_id=workflow["command_id"], owner_id=owner_id)
+        next_command = None
+        if latest and latest.get("status") == "COMPLETED":
+            resumed_workflow = workflow.get("workflow") or {}
+            steps = resumed_workflow.get("steps", [])
+            index = resumed_workflow.get("next_index")
+            if isinstance(steps, list) and isinstance(index, int) and index < len(steps):
+                step = steps[index]
+                capability = step.get("capability") if isinstance(step, dict) else None
+                arguments = step.get("arguments", {}) if isinstance(step, dict) else {}
+                if capability not in {"SCREEN_READ", "SCREEN_CLICK", "SCREEN_SCROLL", "SCREEN_TEXT", "SCREEN_BACK", "APP_LIST", "DEVICE_INFO", "NETWORK_STATUS", "BATTERY_READ", "VOLUME_READ", "OPEN_APP", "MEDIA_PLAY", "MEDIA_PAUSE", "MEDIA_STOP", "VOLUME_SET", "FLASHLIGHT_ON", "FLASHLIGHT_OFF", "SCREEN_CAPTURE"} or not isinstance(arguments, dict):
+                    raise HTTPException(409, "workflow contains an invalid next capability")
+                next_workflow = {**resumed_workflow, "next_index": index + 1, "state": "RUNNING"}
+                queued = transport.enqueue(owner_id=owner_id, device_id=latest["device_id"], capability=capability, arguments={**arguments, "_workflow": next_workflow}, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=15)
+                next_command = {"command_id": queued.command_id, "step_index": index, "step_count": len(steps), "capability": capability, "status": queued.status}
     except CommandTransportError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if workflow is None:
-        raise HTTPException(404, "workflow not found")
-    return {"ok": True, "workflow": workflow, "state": "RUNNING", "message": "Workflow resumed; the next queued step will continue normally."}
+    return {"ok": True, "workflow": workflow, "state": "RUNNING", "next": next_command, "message": "Workflow resumed."}
 
 @router.get("/sessions")
 def sessions(limit: int = 50, owner_id: str = Depends(owner)) -> list[dict]:
