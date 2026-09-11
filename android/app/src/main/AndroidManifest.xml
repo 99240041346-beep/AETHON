@@ -9,7 +9,7 @@
         android:allowBackup="false"
         android:label="AETHON"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:theme="@style/AppTheme">
         <activity
             android:name=".MainActivity"
