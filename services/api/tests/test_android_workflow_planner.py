@@ -7,23 +7,28 @@ def test_settings_wifi_plan_is_bounded_and_ordered():
     encoded = planner.encode(steps)
     assert len(encoded) <= MAX_WORKFLOW_STEPS
     assert [step["capability"] for step in encoded] == ["OPEN_APP", "SCREEN_READ", "SCREEN_CLICK", "SCREEN_READ"]
+    assert encoded[0]["arguments"]["package_name"] == "com.android.settings"
 
 
 def test_open_app_and_click_is_observe_act_observe():
     encoded = AndroidWorkflowPlanner().encode(AndroidWorkflowPlanner().plan("open Chrome and tap Search"))
     assert [step["capability"] for step in encoded] == ["OPEN_APP", "SCREEN_READ", "SCREEN_CLICK", "SCREEN_READ"]
+    assert encoded[0]["arguments"]["package_name"] == "com.android.chrome"
     assert encoded[2]["arguments"] == {"text": "Search"}
 
 
 def test_open_app_and_type_is_bounded():
     encoded = AndroidWorkflowPlanner().encode(AndroidWorkflowPlanner().plan("open Chrome and type hello world into Search"))
     assert [step["capability"] for step in encoded] == ["OPEN_APP", "SCREEN_READ", "SCREEN_TEXT", "SCREEN_READ"]
+    assert encoded[0]["arguments"]["package_name"] == "com.android.chrome"
     assert encoded[2]["arguments"] == {"text": "Search", "value": "hello world"}
 
 
 def test_scroll_and_back_are_observation_first():
     planner = AndroidWorkflowPlanner()
     assert [s.capability for s in planner.plan("scroll down")] == ["SCREEN_READ", "SCREEN_SCROLL", "SCREEN_READ"]
+    assert [s.capability for s in planner.plan("scroll up")][1] == "SCREEN_SCROLL"
+    assert planner.plan("scroll up")[1].arguments["forward"] is False
     assert [s.capability for s in planner.plan("go back")] == ["SCREEN_READ", "SCREEN_BACK", "SCREEN_READ"]
 
 
