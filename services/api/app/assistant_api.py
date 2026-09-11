@@ -1,24 +1,29 @@
 from __future__ import annotations
 
+import secrets
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from aethon.assistant_orchestrator import AssistantMode, AssistantOrchestrator
+from aethon.android_command_transport import AndroidCommandTransport, CommandTransportError
 from aethon.auth import current_owner, security
+from aethon.device_gateway import GatewayError
 from aethon.execution_safety_gate import ExecutionAuthorizationError, SafetyExecutionGate
 from aethon.model_router import ModelRouter
 from aethon.schemas import RiskClass
 from aethon.security import SafetyKernel
 from app.assistant_repository import AssistantRepository
 from app.language_service import detect_language
+from app.device_gateway_api import gateway
 
 router = APIRouter(prefix="/v1/assistant", tags=["assistant"])
 orchestrator = AssistantOrchestrator()
 model_router = ModelRouter()
 safety_gate = SafetyExecutionGate(SafetyKernel())
 repository = AssistantRepository()
+transport = AndroidCommandTransport()
 
 
 class AssistantRequest(BaseModel):
@@ -26,6 +31,13 @@ class AssistantRequest(BaseModel):
     language: str = Field(default="te-IN", min_length=2, max_length=20)
     session_id: str | None = Field(default=None, max_length=100)
     project_id: str | None = Field(default=None, max_length=100)
+
+
+class DeviceActionRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    device_id: str = Field(min_length=1, max_length=128)
+    approval: bool = False
+    ttl_seconds: float = Field(default=15, gt=0, le=30)
 
 
 class AssistantResponse(BaseModel):
@@ -93,15 +105,56 @@ def respond(request: AssistantRequest, owner_id: str = Depends(owner)) -> Assist
         raise HTTPException(503, "assistant response persistence failed") from exc
 
     return AssistantResponse(
-        ok=True,
-        session_id=session_id,
-        language=language,
-        mode=intent.mode,
-        intent=intent.action,
-        response=response,
-        requires_confirmation=intent.requires_confirmation,
-        action_authorized=False,
+        ok=True, session_id=session_id, language=language, mode=intent.mode,
+        intent=intent.action, response=response,
+        requires_confirmation=intent.requires_confirmation, action_authorized=False,
     )
+
+
+@router.post("/device-action")
+def device_action(request: DeviceActionRequest, owner_id: str = Depends(owner)) -> dict:
+    """Translate one bounded natural-language Android action into an approved queue item.
+
+    Execution remains on the paired Android client. This endpoint never performs
+    device I/O itself and requires explicit approval for every side-effecting action.
+    """
+    intent = orchestrator.classify(request.text)
+    capability_map = {
+        "android.open_app": "OPEN_APP",
+        "android.screen_click": "SCREEN_CLICK",
+        "android.screen_scroll": "SCREEN_SCROLL",
+        "android.screen_text": "SCREEN_TEXT",
+        "android.screen_back": "SCREEN_BACK",
+    }
+    capability = capability_map.get(intent.action or "")
+    if capability is None:
+        raise HTTPException(400, "request is not a supported Android action")
+    if not request.approval:
+        return {
+            "ok": True, "authorized": False, "requires_confirmation": True,
+            "intent": intent.action, "capability": capability,
+            "message": "Explicit approval is required before sending this device action.",
+        }
+    try:
+        device = gateway.status(device_id=request.device_id, owner_id=owner_id)
+    except GatewayError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if capability not in set(device["capabilities"]):
+        raise HTTPException(403, "device capability not granted")
+    try:
+        command = transport.enqueue(
+            owner_id=owner_id, device_id=request.device_id, capability=capability,
+            arguments=intent.arguments, nonce=secrets.token_urlsafe(24), approved=True,
+            ttl_seconds=request.ttl_seconds,
+        )
+    except CommandTransportError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "ok": True, "authorized": True, "requires_confirmation": False,
+        "intent": intent.action, "capability": capability,
+        "command_id": command.command_id, "status": command.status,
+        "expires_at": command.expires_at,
+    }
 
 
 @router.get("/sessions")
@@ -133,7 +186,7 @@ def history(session_id: str, limit: int = 50, owner_id: str = Depends(owner)) ->
         raise HTTPException(400, "invalid session id") from exc
     except Exception as exc:
         raise HTTPException(503, "assistant persistence unavailable") from exc
-
+    
 
 @router.delete("/sessions/{session_id}")
 def archive_session(session_id: str, owner_id: str = Depends(owner)) -> dict:
