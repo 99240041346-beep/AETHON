@@ -30,14 +30,15 @@ class CasStore:
         if q.startswith("select command_id,owner_id,device_id,capability,status,arguments_json,issued_at"):
             return [(self.command_id, "owner-a", "phone-1", "SCREEN_READ", "ACCEPTED", {"_workflow": {"id": "wf-1", "state": self.state, "next_index": 1}}, datetime.now(timezone.utc))]
         if q.startswith("select command_id,device_id,capability,status from device_commands"):
-            workflow_id, owner, step_value = params[1], params[0], params[2]
-            step_index = int(step_value) - 1
+            step_index = int(params[2]) - 1
             row = self.workflow_commands.get(step_index)
-            return [
-                (row["command_id"], "phone-1", row["capability"], "ACCEPTED")
-            ] if row else []
+            return [(row["command_id"], "phone-1", row["capability"], "ACCEPTED")] if row else []
         if q.startswith("select command_id,owner_id,device_id,capability,status,verified,error"):
-            return []
+            command_id = params[0]
+            row = next((v for v in self.workflow_commands.values() if v["command_id"] == command_id), None)
+            if not row:
+                return []
+            return [(command_id, "owner-a", "phone-1", row["capability"], "ACCEPTED", False, None, datetime.now(timezone.utc), datetime.now(timezone.utc), None, None, {"_workflow": {"id": "wf-1", "state": "RUNNING", "next_index": 1}}, None, None)]
         if q.startswith("insert into device_commands"):
             self.insert_calls += 1
             if self.simulate_insert_race:
@@ -77,13 +78,7 @@ def test_workflow_step_insert_race_converges_on_existing_active_step():
     t.store.state = "RUNNING"
     t.store.simulate_insert_race = True
     workflow = {"id": "wf-1", "state": "RUNNING", "next_index": 1, "steps": [{"capability": "SCREEN_READ", "arguments": {}}]}
-    command = t.enqueue_workflow_step(
-        owner_id="owner-a",
-        device_id="phone-1",
-        capability="SCREEN_READ",
-        arguments={},
-        workflow=workflow,
-    )
+    command = t.enqueue_workflow_step(owner_id="owner-a", device_id="phone-1", capability="SCREEN_READ", arguments={}, workflow=workflow)
     assert command.command_id == "cmd-raced"
     assert command.capability == "SCREEN_READ"
     assert t.store.insert_calls == 1
@@ -93,23 +88,11 @@ def test_workflow_step_pending_is_single_source_for_existing_active_step():
     t = transport()
     t.store.workflow_commands[0] = {"command_id": "cmd-existing", "capability": "SCREEN_CLICK"}
     workflow = {"id": "wf-1", "state": "RUNNING", "next_index": 1, "steps": [{"capability": "SCREEN_CLICK", "arguments": {}}]}
-    command = t.enqueue_workflow_step(
-        owner_id="owner-a",
-        device_id="phone-1",
-        capability="SCREEN_CLICK",
-        arguments={},
-        workflow=workflow,
-    )
+    command = t.enqueue_workflow_step(owner_id="owner-a", device_id="phone-1", capability="SCREEN_CLICK", arguments={}, workflow=workflow)
     assert command.command_id == "cmd-existing"
 
 
 def test_workflow_step_requires_positive_next_index():
     t = transport()
     with pytest.raises(CommandTransportError):
-        t.enqueue_workflow_step(
-            owner_id="owner-a",
-            device_id="phone-1",
-            capability="SCREEN_READ",
-            arguments={},
-            workflow={"id": "wf-1", "next_index": 0},
-        )
+        t.enqueue_workflow_step(owner_id="owner-a", device_id="phone-1", capability="SCREEN_READ", arguments={}, workflow={"id": "wf-1", "next_index": 0})
