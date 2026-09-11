@@ -26,7 +26,6 @@ class PersistedCommand:
     status: str
 
 class AndroidCommandTransport:
-    """PostgreSQL-backed command queue with single-claim delivery and durable workflow state."""
     MAX_TTL_SECONDS = 30
     WORKFLOW_STATES = {"RUNNING", "PAUSED", "CANCELLED", "COMPLETED", "FAILED"}
 
@@ -45,31 +44,24 @@ class AndroidCommandTransport:
         command_id = str(uuid4())
         issued = time.time(); expires = issued + ttl_seconds
         try:
-            self.store.execute(
-                """INSERT INTO device_commands
+            self.store.execute("""INSERT INTO device_commands
                 (command_id, owner_id, device_id, capability, arguments_json, nonce, status, verified, issued_at, expires_at)
                 VALUES(%s,%s,%s,%s,%s::jsonb,%s,'ACCEPTED',FALSE,%s,%s)""",
-                (command_id, owner_id, device_id, capability, json.dumps({**arguments, "_approved": approved}), nonce, self._ts(issued), self._ts(expires)),
-            )
+                (command_id, owner_id, device_id, capability, json.dumps({**arguments, "_approved": approved}), nonce, self._ts(issued), self._ts(expires)))
         except Exception as exc:
             raise CommandTransportError("command could not be persisted") from exc
         return PersistedCommand(command_id, owner_id, device_id, capability, arguments, nonce, issued, expires, "ACCEPTED")
 
     def claim_next(self, *, device_id: str, owner_id: str) -> PersistedCommand | None:
         now = self._ts(time.time())
-        rows = self.store.execute(
-            """WITH next_command AS (
+        rows = self.store.execute("""WITH next_command AS (
                    SELECT command_id FROM device_commands
-                   WHERE device_id=%s AND owner_id=%s AND status='ACCEPTED'
-                     AND expires_at>%s AND claimed_at IS NULL
+                   WHERE device_id=%s AND owner_id=%s AND status='ACCEPTED' AND expires_at>%s AND claimed_at IS NULL
                      AND COALESCE(arguments_json->'_workflow'->>'state','RUNNING')='RUNNING'
-                   ORDER BY issued_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
-               )
-               UPDATE device_commands AS dc SET claimed_at=NOW()
-               FROM next_command WHERE dc.command_id=next_command.command_id
-               RETURNING dc.command_id,dc.owner_id,dc.device_id,dc.capability,dc.arguments_json,dc.nonce,dc.issued_at,dc.expires_at,dc.status""",
-            (device_id, owner_id, now),
-        )
+                   ORDER BY issued_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED)
+               UPDATE device_commands AS dc SET claimed_at=NOW() FROM next_command
+               WHERE dc.command_id=next_command.command_id
+               RETURNING dc.command_id,dc.owner_id,dc.device_id,dc.capability,dc.arguments_json,dc.nonce,dc.issued_at,dc.expires_at,dc.status""", (device_id, owner_id, now))
         if not rows:
             self.expire_pending(device_id=device_id, owner_id=owner_id); return None
         r = rows[0]; args = r[4] if isinstance(r[4], dict) else json.loads(r[4]); args.pop("_approved", None)
@@ -85,95 +77,70 @@ class AndroidCommandTransport:
 
     def record_result(self, *, command_id: str, device_id: str, owner_id: str, success: bool, verified: bool, result: dict[str, Any] | None = None, verification: dict[str, Any] | None = None, error: str | None = None) -> dict[str, Any]:
         status = 'COMPLETED' if success and verified else 'REJECTED'
-        rows = self.store.execute(
-            """UPDATE device_commands SET status=%s, verified=%s, result_json=%s::jsonb, verification_json=%s::jsonb,
+        rows = self.store.execute("""UPDATE device_commands SET status=%s, verified=%s, result_json=%s::jsonb, verification_json=%s::jsonb,
                error=%s, completed_at=NOW(), result_received_at=NOW()
                WHERE command_id=%s AND owner_id=%s AND device_id=%s AND status='ACCEPTED' AND claimed_at IS NOT NULL AND expires_at>NOW()
-               RETURNING command_id,status,verified,error""",
-            (status, verified, json.dumps(result or {}), json.dumps(verification or {}), error, command_id, owner_id, device_id),
-        )
+               RETURNING command_id,status,verified,error""", (status, verified, json.dumps(result or {}), json.dumps(verification or {}), error, command_id, owner_id, device_id))
         if not rows: raise CommandTransportError("command is missing, expired, cancelled, unclaimed, or already completed")
         r = rows[0]; return {"command_id": str(r[0]), "status": r[1], "verified": bool(r[2]), "error": r[3]}
 
     def get(self, *, command_id: str, owner_id: str) -> dict[str, Any] | None:
         rows = self.store.execute("""SELECT command_id,owner_id,device_id,capability,status,verified,error,issued_at,expires_at,claimed_at,completed_at,arguments_json,result_json,verification_json FROM device_commands WHERE command_id=%s AND owner_id=%s""", (command_id, owner_id))
         if not rows: return None
-        r = rows[0]
-        arguments = r[11] if isinstance(r[11], dict) else (json.loads(r[11]) if r[11] else {})
-        arguments.pop("_approved", None)
+        r = rows[0]; arguments = r[11] if isinstance(r[11], dict) else (json.loads(r[11]) if r[11] else {}); arguments.pop("_approved", None)
         return {"command_id": str(r[0]), "owner_id": r[1], "device_id": r[2], "capability": r[3], "status": r[4], "verified": bool(r[5]), "error": r[6], "issued_at": r[7].isoformat(), "expires_at": r[8].isoformat(), "claimed_at": r[9].isoformat() if r[9] else None, "completed_at": r[10].isoformat() if r[10] else None, "arguments": arguments, "result": r[12] if isinstance(r[12], dict) else (json.loads(r[12]) if r[12] else None), "verification": r[13] if isinstance(r[13], dict) else (json.loads(r[13]) if r[13] else None)}
 
     def _workflow_row(self, *, workflow_id: str, owner_id: str) -> dict[str, Any] | None:
-        rows = self.store.execute(
-            """SELECT command_id,owner_id,device_id,capability,status,arguments_json,issued_at
-               FROM device_commands
-               WHERE owner_id=%s AND arguments_json->'_workflow'->>'id'=%s
-               ORDER BY issued_at DESC LIMIT 1""",
-            (owner_id, workflow_id),
-        )
-        if not rows:
-            return None
-        r = rows[0]
-        args = r[5] if isinstance(r[5], dict) else json.loads(r[5] or "{}")
-        workflow = args.get("_workflow") if isinstance(args.get("_workflow"), dict) else None
+        rows = self.store.execute("""SELECT command_id,owner_id,device_id,capability,status,arguments_json,issued_at FROM device_commands
+               WHERE owner_id=%s AND arguments_json->'_workflow'->>'id'=%s ORDER BY issued_at DESC LIMIT 1""", (owner_id, workflow_id))
+        if not rows: return None
+        r = rows[0]; args = r[5] if isinstance(r[5], dict) else json.loads(r[5] or "{}"); workflow = args.get("_workflow") if isinstance(args.get("_workflow"), dict) else None
         return {"command_id": str(r[0]), "owner_id": r[1], "device_id": r[2], "capability": r[3], "status": r[4], "workflow": workflow, "issued_at": r[6].isoformat()}
 
     def workflow(self, *, workflow_id: str, owner_id: str) -> dict[str, Any] | None:
         return self._workflow_row(workflow_id=workflow_id, owner_id=owner_id)
 
     def workflow_step_pending(self, *, workflow_id: str, owner_id: str, step_index: int) -> dict[str, Any] | None:
-        """Return an active command already representing a workflow step."""
-        if step_index < 0:
-            return None
-        rows = self.store.execute(
-            """SELECT command_id,device_id,capability,status
-               FROM device_commands
-               WHERE owner_id=%s
-                 AND arguments_json->'_workflow'->>'id'=%s
-                 AND arguments_json->'_workflow'->>'next_index'=%s
-                 AND status='ACCEPTED'
-               ORDER BY issued_at DESC LIMIT 1""",
-            (owner_id, workflow_id, str(step_index + 1)),
-        )
-        if not rows:
-            return None
-        r = rows[0]
-        return {"command_id": str(r[0]), "device_id": r[1], "capability": r[2], "status": r[3]}
+        if step_index < 0: return None
+        rows = self.store.execute("""SELECT command_id,device_id,capability,status FROM device_commands
+               WHERE owner_id=%s AND arguments_json->'_workflow'->>'id'=%s
+                 AND arguments_json->'_workflow'->>'next_index'=%s AND status='ACCEPTED'
+               ORDER BY issued_at DESC LIMIT 1""", (owner_id, workflow_id, str(step_index + 1)))
+        if not rows: return None
+        r = rows[0]; return {"command_id": str(r[0]), "device_id": r[1], "capability": r[2], "status": r[3]}
 
     def enqueue_workflow_step(self, *, owner_id: str, device_id: str, capability: str, arguments: dict[str, Any], workflow: dict[str, Any], ttl_seconds: float = 15) -> PersistedCommand:
-        """Idempotently enqueue one workflow step; the DB unique index arbitrates concurrent callers."""
-        workflow_id = str(workflow.get("id", ""))
-        next_index = workflow.get("next_index")
-        if not workflow_id or not isinstance(next_index, int) or next_index <= 0:
-            raise CommandTransportError("invalid workflow step metadata")
-        step_index = next_index - 1
-        pending = self.workflow_step_pending(workflow_id=workflow_id, owner_id=owner_id, step_index=step_index)
+        workflow_id = str(workflow.get("id", "")); next_index = workflow.get("next_index")
+        if not workflow_id or not isinstance(next_index, int) or next_index <= 0: raise CommandTransportError("invalid workflow step metadata")
+        step_index = next_index - 1; pending = self.workflow_step_pending(workflow_id=workflow_id, owner_id=owner_id, step_index=step_index)
         if pending:
             existing = self.get(command_id=pending["command_id"], owner_id=owner_id)
-            if existing:
-                return PersistedCommand(existing["command_id"], owner_id, device_id, existing["capability"], existing["arguments"], "", time.time(), time.time() + ttl_seconds, existing["status"])
+            if existing: return PersistedCommand(existing["command_id"], owner_id, device_id, existing["capability"], existing["arguments"], "", time.time(), time.time() + ttl_seconds, existing["status"])
         try:
             return self.enqueue(owner_id=owner_id, device_id=device_id, capability=capability, arguments={**arguments, "_workflow": workflow}, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=ttl_seconds)
         except CommandTransportError as exc:
             pending = self.workflow_step_pending(workflow_id=workflow_id, owner_id=owner_id, step_index=step_index)
             if pending:
                 existing = self.get(command_id=pending["command_id"], owner_id=owner_id)
-                if existing:
-                    return PersistedCommand(existing["command_id"], owner_id, device_id, existing["capability"], existing["arguments"], "", time.time(), time.time() + ttl_seconds, existing["status"])
+                if existing: return PersistedCommand(existing["command_id"], owner_id, device_id, existing["capability"], existing["arguments"], "", time.time(), time.time() + ttl_seconds, existing["status"])
             raise exc
 
     def set_workflow_state(self, *, workflow_id: str, owner_id: str, state: str) -> dict[str, Any] | None:
-        if state not in self.WORKFLOW_STATES:
+        return self.transition_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state=state, expected_state=None)
+
+    def transition_workflow_state(self, *, workflow_id: str, owner_id: str, state: str, expected_state: str | None) -> dict[str, Any] | None:
+        if state not in self.WORKFLOW_STATES or (expected_state is not None and expected_state not in self.WORKFLOW_STATES):
             raise CommandTransportError("invalid workflow state")
-        row = self._workflow_row(workflow_id=workflow_id, owner_id=owner_id)
-        if row is None or not isinstance(row.get("workflow"), dict):
-            return None
-        workflow = dict(row["workflow"]); workflow["state"] = state
-        self.store.execute(
-            """UPDATE device_commands SET arguments_json=jsonb_set(arguments_json,'{_workflow}',%s::jsonb)
-               WHERE owner_id=%s AND arguments_json->'_workflow'->>'id'=%s""",
-            (json.dumps(workflow), owner_id, workflow_id),
-        )
+        where = "owner_id=%s AND arguments_json->'_workflow'->>'id'=%s"
+        params: list[Any] = [owner_id, workflow_id]
+        if expected_state is not None:
+            where += " AND arguments_json->'_workflow'->>'state'=%s"
+            params.append(expected_state)
+        rows = self.store.execute(f"""UPDATE device_commands SET arguments_json=jsonb_set(arguments_json,'{{_workflow,state}}',%s::jsonb)
+               WHERE {where} RETURNING command_id""", tuple([json.dumps(state), *params]))
+        if not rows:
+            return None if expected_state is not None else self._workflow_row(workflow_id=workflow_id, owner_id=owner_id)
         if state == "CANCELLED":
-            self.store.execute("""UPDATE device_commands SET status='CANCELLED', completed_at=NOW(), error='workflow cancelled by owner' WHERE owner_id=%s AND arguments_json->'_workflow'->>'id'=%s AND status='ACCEPTED' AND claimed_at IS NULL""", (owner_id, workflow_id))
+            self.store.execute("""UPDATE device_commands SET status='CANCELLED', completed_at=NOW(), error='workflow cancelled by owner'
+               WHERE owner_id=%s AND arguments_json->'_workflow'->>'id'=%s AND status='ACCEPTED' AND claimed_at IS NULL""", (owner_id, workflow_id))
         return self._workflow_row(workflow_id=workflow_id, owner_id=owner_id)
