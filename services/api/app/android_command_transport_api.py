@@ -90,17 +90,22 @@ def result(device_id: str, request: ResultRequest, authorization: str | None = H
     transport = _transport()
     command = transport.get(command_id=request.command_id, owner_id=device.owner_id)
     if command is None or command["device_id"] != device_id: raise HTTPException(404, "command not found")
-    try:
-        recorded = transport.record_result(command_id=request.command_id, device_id=device_id, owner_id=device.owner_id, success=request.success, verified=request.verified, result=request.result, verification=request.verification, error=request.error)
-    except CommandTransportError as exc: raise HTTPException(409, str(exc)) from exc
     workflow = command.get("arguments", {}).get("_workflow")
+    semantic_verified = True
+    expected = None
+    if isinstance(workflow, dict):
+        next_index = workflow.get("next_index")
+        steps = workflow.get("steps", [])
+        index = int(next_index) - 1 if isinstance(next_index, int) else -1
+        expected = steps[index].get("verify") if 0 <= index < len(steps) and isinstance(steps[index], dict) else None
+        if expected:
+            semantic_verified = AndroidWorkflowPlanner.verify({"verify": expected}, request.result)
+    effective_verified = request.verified and semantic_verified
+    try:
+        recorded = transport.record_result(command_id=request.command_id, device_id=device_id, owner_id=device.owner_id, success=request.success, verified=effective_verified, result=request.result, verification=request.verification, error=request.error or ("semantic verification failed" if not semantic_verified else None))
+    except CommandTransportError as exc: raise HTTPException(409, str(exc)) from exc
     if recorded["status"] != "COMPLETED" or not isinstance(workflow, dict):
         return {"ok": True, "result": recorded, "workflow": {"status": "COMPLETED" if recorded["status"] == "COMPLETED" else "VERIFICATION_FAILED", "next": None}}
-    index = int(workflow.get("next_index", 999)) - 1
-    steps = workflow.get("steps", [])
-    expected = steps[index].get("verify") if 0 <= index < len(steps) and isinstance(steps[index], dict) else None
-    if expected and not AndroidWorkflowPlanner.verify({"verify": expected}, request.result):
-        return {"ok": True, "result": recorded, "workflow": {"status": "VERIFICATION_FAILED", "next": None}}
     try: next_step = _enqueue_next_workflow_step(command, device.owner_id, transport)
     except CommandTransportError as exc: raise HTTPException(409, "workflow could not advance") from exc
     return {"ok": True, "result": recorded, "workflow": {"status": "RUNNING" if next_step else "COMPLETED", "next": next_step}}
