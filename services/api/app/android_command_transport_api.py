@@ -15,7 +15,8 @@ router = APIRouter(prefix="/v1/android/commands", tags=["android-command-transpo
 # Canonical bounded Android capabilities. Keep this synchronized with the
 # native AndroidCapabilityRegistry and DeviceGateway capability contract.
 _ALLOWED = {
-    "SCREEN_READ", "APP_LIST", "DEVICE_INFO", "NETWORK_STATUS", "BATTERY_READ", "VOLUME_READ",
+    "SCREEN_READ", "SCREEN_CLICK", "SCREEN_SCROLL", "SCREEN_TEXT", "SCREEN_BACK",
+    "APP_LIST", "DEVICE_INFO", "NETWORK_STATUS", "BATTERY_READ", "VOLUME_READ",
     "OPEN_APP", "MEDIA_PLAY", "MEDIA_PAUSE", "MEDIA_STOP", "VOLUME_SET",
     "FLASHLIGHT_ON", "FLASHLIGHT_OFF", "SCREEN_CAPTURE",
 }
