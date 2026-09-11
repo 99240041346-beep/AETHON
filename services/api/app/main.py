@@ -18,6 +18,7 @@ from aethon.migrations import migrate_from_environment
 from aethon.voice_api import router as voice_router
 from aethon.device_gateway_api import router as device_router
 from aethon.assistant_api import router as assistant_router
+from app.assistant_runtime_api import router as assistant_runtime_router
 from app.language_api import router as language_router
 from aethon.android_command_transport_api import router as android_command_transport_router
 from app.capability_registry import CapabilityRegistry
@@ -43,6 +44,7 @@ capabilities = CapabilityRegistry({spec.name for spec in tools.list()})
 app.include_router(voice_router)
 app.include_router(device_router)
 app.include_router(assistant_router)
+app.include_router(assistant_runtime_router)
 app.include_router(language_router)
 app.include_router(android_command_transport_router)
 
