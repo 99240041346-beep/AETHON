@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -153,8 +154,6 @@ class AndroidCommandTransport:
                 return PersistedCommand(existing["command_id"], owner_id, device_id, existing["capability"], existing["arguments"], "", time.time(), time.time() + ttl_seconds, existing["status"])
         try:
             return self.enqueue(owner_id=owner_id, device_id=device_id, capability=capability, arguments={**arguments, "_workflow": workflow}, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=ttl_seconds)
-        except NameError:
-            raise
         except CommandTransportError as exc:
             pending = self.workflow_step_pending(workflow_id=workflow_id, owner_id=owner_id, step_index=step_index)
             if pending:
