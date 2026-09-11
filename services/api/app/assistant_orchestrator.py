@@ -38,6 +38,11 @@ class AssistantOrchestrator:
     _SCROLL = re.compile(r"(?:scroll|swipe)\s+(up|down|forward|backward)$", re.I)
     _TEXT = re.compile(r"(?:type|enter|write)\s+(.+?)\s+(?:in|into)\s+(.+)$", re.I)
     _BACK = re.compile(r"(?:go\s+back|press\s+back|back)$", re.I)
+    _PACKAGES = {
+        "youtube": "com.google.android.youtube",
+        "chrome": "com.android.chrome",
+        "settings": "com.android.settings",
+    }
 
     def classify(self, text: str) -> AssistantIntent:
         value = text.strip()
@@ -47,7 +52,10 @@ class AssistantOrchestrator:
 
         match = self._OPEN_APP.search(value) or self._OPEN_APP_TE.search(value)
         if match:
-            return AssistantIntent(AssistantMode.ACTION, value, "android.open_app", {"app": match.group(1).strip()})
+            app = match.group(1).strip()
+            package = self._PACKAGES.get(app.casefold())
+            if package:
+                return AssistantIntent(AssistantMode.ACTION, value, "android.open_app", {"app": app, "package": package})
 
         match = self._CLICK.search(value) or self._CLICK_TE.search(value)
         if match:
