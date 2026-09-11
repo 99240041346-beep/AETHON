@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from aethon.assistant_orchestrator import AssistantIntent, AssistantMode, AssistantOrchestrator
 from aethon.execution_safety_gate import ExecutionAuthorizationError, SafetyExecutionGate
 from aethon.model_router import ModelRouter
-from aethon.schemas import RiskClass, ToolRequest, ToolResult
+from aethon.schemas import ToolRequest, ToolResult
 from aethon.security import SafetyKernel
 from app.assistant_repository import AssistantRepository
 from app.tools import ToolRegistry
@@ -98,31 +98,15 @@ class AssistantRuntime:
         spec = next((item for item in self.tools.list() if item.name == request.tool), None)
         self._emit(events, "tool.selected", request_id, tool=request.tool)
         if spec is None:
-            return RuntimeResult(
-                request_id,
-                session_id,
-                intent.mode,
-                intent,
-                "Tool not found.",
-                events=tuple(events),
-                error="tool not found",
-            )
+            return RuntimeResult(request_id, session_id, intent.mode, intent, "Tool not found.", events=tuple(events), error="tool not found")
         if spec.side_effects and not require_approval:
             self._emit(events, "approval.required", request_id, tool=spec.name, risk=spec.risk.value)
-            response = "This tool can change external state and requires your explicit approval before execution."
-            self.repository.add_message(
-                session_id,
-                "",
-                "assistant",
-                response,
-                metadata={"request_id": request_id, "tool": spec.name, "status": "AWAITING_APPROVAL"},
-            ) if False else None
             return RuntimeResult(
                 request_id,
                 session_id,
                 intent.mode,
                 intent,
-                response,
+                "This tool can change external state and requires your explicit approval before execution.",
                 events=tuple(events),
                 requires_confirmation=True,
             )
@@ -194,15 +178,7 @@ class AssistantRuntime:
                 metadata={"request_id": request_id, "verified": False},
             )
             self._emit(events, "action.planned", request_id, requires_confirmation=intent.requires_confirmation)
-            return RuntimeResult(
-                request_id,
-                session_id,
-                intent.mode,
-                intent,
-                response,
-                events=tuple(events),
-                requires_confirmation=intent.requires_confirmation,
-            )
+            return RuntimeResult(request_id, session_id, intent.mode, intent, response, events=tuple(events), requires_confirmation=intent.requires_confirmation)
 
         tool = self._tool_intent(intent)
         if tool is not None and execute_tools:
@@ -255,12 +231,4 @@ class AssistantRuntime:
             metadata={"request_id": request_id, "verified": False},
         )
         self._emit(events, "response.ready", request_id, status=status)
-        return RuntimeResult(
-            request_id,
-            session_id,
-            intent.mode,
-            intent,
-            response,
-            events=tuple(events),
-            error=None if status == "SUCCEEDED" else "model generation failed",
-        )
+        return RuntimeResult(request_id, session_id, intent.mode, intent, response, events=tuple(events), error=None if status == "SUCCEEDED" else "model generation failed")
