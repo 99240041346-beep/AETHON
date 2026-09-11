@@ -120,6 +120,25 @@ class AndroidCommandTransport:
     def workflow(self, *, workflow_id: str, owner_id: str) -> dict[str, Any] | None:
         return self._workflow_row(workflow_id=workflow_id, owner_id=owner_id)
 
+    def workflow_step_pending(self, *, workflow_id: str, owner_id: str, step_index: int) -> dict[str, Any] | None:
+        """Return an active command already representing a workflow step."""
+        if step_index < 0:
+            return None
+        rows = self.store.execute(
+            """SELECT command_id,device_id,capability,status
+               FROM device_commands
+               WHERE owner_id=%s
+                 AND arguments_json->'_workflow'->>'id'=%s
+                 AND arguments_json->'_workflow'->>'next_index'=%s
+                 AND status='ACCEPTED'
+               ORDER BY issued_at DESC LIMIT 1""",
+            (owner_id, workflow_id, str(step_index + 1)),
+        )
+        if not rows:
+            return None
+        r = rows[0]
+        return {"command_id": str(r[0]), "device_id": r[1], "capability": r[2], "status": r[3]}
+
     def set_workflow_state(self, *, workflow_id: str, owner_id: str, state: str) -> dict[str, Any] | None:
         if state not in self.WORKFLOW_STATES:
             raise CommandTransportError("invalid workflow state")
