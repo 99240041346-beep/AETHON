@@ -61,7 +61,7 @@ public final class AndroidActionExecutor {
 
     private Result screenRead(Map<String, Object> args) {
         int maxNodes = 100;
-        Number requested = numberArg(args, "max_nodes");
+        Number requested = args.get("max_nodes") instanceof Number ? (Number) args.get("max_nodes") : numberArg(args, "maxNodes");
         if (requested != null) maxNodes = Math.max(1, Math.min(250, requested.intValue()));
         Map<String, Object> data = new HashMap<>(); data.put("connected", UiObservationService.isConnected());
         data.put("snapshot", UiObservationService.snapshot(maxNodes));
@@ -70,23 +70,23 @@ public final class AndroidActionExecutor {
     }
 
     private Result screenClick(Map<String, Object> args) {
-        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_CLICK, args,
-                () -> UiObservationService.click(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name")), "UI click");
+        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_CLICK,
+                () -> UiObservationService.click(selector(args, "text"), selector(args, "description"), selector(args, "class_name", "className"), selector(args, "package_name", "packageName")), "UI click");
     }
 
     private Result screenScroll(Map<String, Object> args) {
         Object direction = args.get("direction");
-        boolean forward = direction == null || "forward".equalsIgnoreCase(String.valueOf(direction));
-        if (!forward && !"backward".equalsIgnoreCase(String.valueOf(direction))) return Result.rejected(AndroidCapabilityRegistry.SCREEN_SCROLL, "direction must be forward or backward");
-        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_SCROLL, args,
-                () -> UiObservationService.scroll(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name"), forward), "UI scroll");
+        boolean forward = direction == null ? booleanArg(args, "forward", true) : "forward".equalsIgnoreCase(String.valueOf(direction));
+        if (direction != null && !forward && !"backward".equalsIgnoreCase(String.valueOf(direction))) return Result.rejected(AndroidCapabilityRegistry.SCREEN_SCROLL, "direction must be forward or backward");
+        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_SCROLL,
+                () -> UiObservationService.scroll(selector(args, "text"), selector(args, "description"), selector(args, "class_name", "className"), selector(args, "package_name", "packageName"), forward), "UI scroll");
     }
 
     private Result screenText(Map<String, Object> args) {
         String value = selector(args, "value");
         if (value == null || value.length() > 2000) return Result.rejected(AndroidCapabilityRegistry.SCREEN_TEXT, "value is required and must be at most 2000 characters");
-        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_TEXT, args,
-                () -> UiObservationService.setText(selector(args, "text"), selector(args, "description"), selector(args, "class_name"), selector(args, "package_name"), value), "UI text entry");
+        return executeObservedUiAction(AndroidCapabilityRegistry.SCREEN_TEXT,
+                () -> UiObservationService.setText(selector(args, "text"), selector(args, "description"), selector(args, "class_name", "className"), selector(args, "package_name", "packageName"), value), "UI text entry");
     }
 
     private Result screenBack() {
@@ -99,7 +99,7 @@ public final class AndroidActionExecutor {
 
     private interface UiAction { JSONObject run(); }
 
-    private Result executeObservedUiAction(String capability, Map<String, Object> args, UiAction action, String description) {
+    private Result executeObservedUiAction(String capability, UiAction action, String description) {
         if (!UiObservationService.isConnected()) return Result.rejected(capability, "Accessibility observation service is not enabled");
         JSONObject before = UiObservationService.snapshot(250);
         if (!before.optBoolean("connected", false)) return Result.rejected(capability, "Unable to observe active UI before action");
@@ -110,12 +110,17 @@ public final class AndroidActionExecutor {
 
     private Result observedResult(String capability, JSONObject actionResult, JSONObject before, JSONObject after, String action) {
         boolean success = actionResult.optBoolean("success", false);
+        boolean postObserved = after.optBoolean("connected", false) && !after.has("error");
         Map<String, Object> data = new HashMap<>();
         data.put("result", actionResult.toString());
         data.put("pre_snapshot", before.toString());
         data.put("post_snapshot", after.toString());
         if (!success) return Result.rejected(capability, actionResult.optString("message", action + " rejected"));
-        return Result.acceptedUnverified(capability, action + " requested; post-action UI snapshot attached for verification", data);
+        // This verifies that Android accepted the action and the UI remained observable.
+        // Workflow-level state verification is still performed by the following SCREEN_READ step.
+        return postObserved
+                ? Result.success(capability, action + " executed and post-action UI observed", data)
+                : Result.acceptedUnverified(capability, action + " executed but post-action UI could not be observed", data);
     }
 
     private Result openApp(String packageName) {
@@ -185,9 +190,14 @@ public final class AndroidActionExecutor {
         data.put("android_version", Build.VERSION.RELEASE); data.put("sdk", Build.VERSION.SDK_INT); return Result.success(AndroidCapabilityRegistry.DEVICE_INFO, "Device information read", data);
     }
 
-    private static String selector(Map<String, Object> args, String key) {
-        Object value = args.get(key); return value instanceof String && !((String) value).trim().isEmpty() ? (String) value : null;
+    private static String selector(Map<String, Object> args, String... keys) {
+        for (String key : keys) {
+            Object value = args.get(key);
+            if (value instanceof String && !((String) value).trim().isEmpty()) return (String) value;
+        }
+        return null;
     }
     private static String stringArg(Map<String, Object> args, String key) { Object value = args.get(key); return value instanceof String ? (String) value : null; }
     private static Number numberArg(Map<String, Object> args, String key) { Object value = args.get(key); return value instanceof Number ? (Number) value : null; }
+    private static boolean booleanArg(Map<String, Object> args, String key, boolean fallback) { Object value = args.get(key); return value instanceof Boolean ? (Boolean) value : fallback; }
 }
