@@ -57,6 +57,9 @@ public final class MainActivity extends Activity implements TextToSpeech.OnInitL
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.addView(root);setContentView(scroll);
         TextView brand=label("AETHON",32);brand.setGravity(Gravity.CENTER);brand.setTypeface(null,1);root.addView(brand,new LinearLayout.LayoutParams(-1,-2));
         TextView sub=label("Your intelligent multilingual AI companion",15);sub.setGravity(Gravity.CENTER);sub.setTextColor(Color.rgb(148,163,184));root.addView(sub,new LinearLayout.LayoutParams(-1,-2));
+        Button commandCenter=button("✦  Open Personal AI Command Center");
+        commandCenter.setOnClickListener(v->startActivity(new Intent(this,AethonDashboardActivity.class)));
+        LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,dp(52));cp.setMargins(0,dp(12),0,dp(2));root.addView(commandCenter,cp);
         LinearLayout sc=new LinearLayout(this);sc.setOrientation(LinearLayout.VERTICAL);sc.setPadding(dp(18),dp(14),dp(18),dp(14));sc.setBackground(card());LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,-2);sp.setMargins(0,dp(20),0,dp(10));root.addView(sc,sp);
         TextView ready=label("●  AETHON READY",13);ready.setTextColor(Color.rgb(74,222,128));sc.addView(ready);status=label("Listening • Thinking • Acting securely",14);status.setTextColor(Color.rgb(203,213,225));sc.addView(status);
         LinearLayout cc=new LinearLayout(this);cc.setOrientation(LinearLayout.VERTICAL);cc.setPadding(dp(18),dp(14),dp(18),dp(14));cc.setBackground(card());LinearLayout.LayoutParams ccp=new LinearLayout.LayoutParams(-1,-2);ccp.setMargins(0,dp(4),0,dp(10));root.addView(cc,ccp);
