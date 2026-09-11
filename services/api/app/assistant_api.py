@@ -25,8 +25,19 @@ orchestrator = AssistantOrchestrator()
 model_router = ModelRouter()
 safety_gate = SafetyExecutionGate(SafetyKernel())
 repository = AssistantRepository()
-transport = AndroidCommandTransport()
 workflow_planner = AndroidWorkflowPlanner()
+_transport_instance: AndroidCommandTransport | None = None
+
+
+def _transport() -> AndroidCommandTransport:
+    global _transport_instance
+    if _transport_instance is None:
+        try:
+            _transport_instance = AndroidCommandTransport()
+        except Exception as exc:
+            raise HTTPException(503, "Android cloud command transport is unavailable until AETHON_DATABASE_URL is configured") from exc
+    return _transport_instance
+
 
 class AssistantRequest(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
@@ -106,7 +117,7 @@ def device_action(request: DeviceActionRequest, owner_id: str = Depends(owner)) 
     if capability not in set(device["capabilities"]):
         raise HTTPException(403, "device capability not granted")
     try:
-        command = transport.enqueue(owner_id=owner_id, device_id=request.device_id, capability=capability, arguments=intent.arguments, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=request.ttl_seconds)
+        command = _transport().enqueue(owner_id=owner_id, device_id=request.device_id, capability=capability, arguments=intent.arguments, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=request.ttl_seconds)
     except CommandTransportError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "authorized": True, "requires_confirmation": False, "intent": intent.action, "capability": capability, "command_id": command.command_id, "status": command.status, "expires_at": command.expires_at}
@@ -129,14 +140,14 @@ def device_workflow(request: DeviceWorkflowRequest, owner_id: str = Depends(owne
     workflow = {"id": workflow_id, "steps": steps, "next_index": 1, "max_retries": 1, "state": "RUNNING"}
     first = steps[0]
     try:
-        command = transport.enqueue_workflow_step(owner_id=owner_id, device_id=request.device_id, capability=first["capability"], arguments=first["arguments"], workflow=workflow, ttl_seconds=request.ttl_seconds)
+        command = _transport().enqueue_workflow_step(owner_id=owner_id, device_id=request.device_id, capability=first["capability"], arguments=first["arguments"], workflow=workflow, ttl_seconds=request.ttl_seconds)
     except CommandTransportError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "authorized": True, "workflow_started": True, "workflow_id": workflow_id, "step_index": 0, "step_count": len(steps), "command_id": command.command_id, "capability": command.capability, "status": command.status}
 
 @router.get("/android-workflows/{workflow_id}")
 def workflow_status(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
-    workflow = transport.workflow(workflow_id=workflow_id, owner_id=owner_id)
+    workflow = _transport().workflow(workflow_id=workflow_id, owner_id=owner_id)
     if workflow is None:
         raise HTTPException(404, "workflow not found")
     return {"ok": True, **workflow}
@@ -144,7 +155,7 @@ def workflow_status(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
 @router.post("/android-workflows/{workflow_id}/pause")
 def pause_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
     try:
-        workflow = transport.set_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state="PAUSED")
+        workflow = _transport().set_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state="PAUSED")
     except CommandTransportError as exc:
         raise HTTPException(400, str(exc)) from exc
     if workflow is None:
@@ -154,7 +165,7 @@ def pause_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
 @router.post("/android-workflows/{workflow_id}/cancel")
 def cancel_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
     try:
-        workflow = transport.set_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state="CANCELLED")
+        workflow = _transport().set_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state="CANCELLED")
     except CommandTransportError as exc:
         raise HTTPException(400, str(exc)) from exc
     if workflow is None:
@@ -164,6 +175,7 @@ def cancel_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
 @router.post("/android-workflows/{workflow_id}/resume")
 def resume_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
     try:
+        transport = _transport()
         current = transport.workflow(workflow_id=workflow_id, owner_id=owner_id)
         if current is None or not isinstance(current.get("workflow"), dict):
             raise HTTPException(404, "workflow not found")
