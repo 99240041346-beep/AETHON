@@ -139,6 +139,30 @@ class AndroidCommandTransport:
         r = rows[0]
         return {"command_id": str(r[0]), "device_id": r[1], "capability": r[2], "status": r[3]}
 
+    def enqueue_workflow_step(self, *, owner_id: str, device_id: str, capability: str, arguments: dict[str, Any], workflow: dict[str, Any], ttl_seconds: float = 15) -> PersistedCommand:
+        """Idempotently enqueue one workflow step; the DB unique index arbitrates concurrent callers."""
+        workflow_id = str(workflow.get("id", ""))
+        next_index = workflow.get("next_index")
+        if not workflow_id or not isinstance(next_index, int) or next_index <= 0:
+            raise CommandTransportError("invalid workflow step metadata")
+        step_index = next_index - 1
+        pending = self.workflow_step_pending(workflow_id=workflow_id, owner_id=owner_id, step_index=step_index)
+        if pending:
+            existing = self.get(command_id=pending["command_id"], owner_id=owner_id)
+            if existing:
+                return PersistedCommand(existing["command_id"], owner_id, device_id, existing["capability"], existing["arguments"], "", time.time(), time.time() + ttl_seconds, existing["status"])
+        try:
+            return self.enqueue(owner_id=owner_id, device_id=device_id, capability=capability, arguments={**arguments, "_workflow": workflow}, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=ttl_seconds)
+        except NameError:
+            raise
+        except CommandTransportError as exc:
+            pending = self.workflow_step_pending(workflow_id=workflow_id, owner_id=owner_id, step_index=step_index)
+            if pending:
+                existing = self.get(command_id=pending["command_id"], owner_id=owner_id)
+                if existing:
+                    return PersistedCommand(existing["command_id"], owner_id, device_id, existing["capability"], existing["arguments"], "", time.time(), time.time() + ttl_seconds, existing["status"])
+            raise exc
+
     def set_workflow_state(self, *, workflow_id: str, owner_id: str, state: str) -> dict[str, Any] | None:
         if state not in self.WORKFLOW_STATES:
             raise CommandTransportError("invalid workflow state")
