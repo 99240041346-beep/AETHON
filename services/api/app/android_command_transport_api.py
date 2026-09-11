@@ -133,9 +133,16 @@ def result(device_id: str, request: ResultRequest, authorization: str | None = H
     if recorded["status"] == "COMPLETED":
         if not isinstance(workflow, dict) or workflow_state != "RUNNING":
             return {"ok": True, "result": recorded, "workflow": {"status": workflow_state or "COMPLETED", "next": None}}
+        next_index = durable_workflow.get("next_index") if isinstance(durable_workflow, dict) else None
+        steps = durable_workflow.get("steps", []) if isinstance(durable_workflow, dict) else []
+        if isinstance(next_index, int) and isinstance(steps, list) and next_index >= len(steps):
+            completed = transport.set_workflow_state(workflow_id=str(workflow["id"]), owner_id=device.owner_id, state="COMPLETED")
+            return {"ok": True, "result": recorded, "workflow": {"status": "COMPLETED", "next": None, "state": completed}}
         try: next_step = _enqueue_next_workflow_step({**command, "arguments": {**command.get("arguments", {}), "_workflow": durable_workflow}}, device.owner_id, transport)
         except CommandTransportError as exc: raise HTTPException(409, "workflow could not advance") from exc
-        return {"ok": True, "result": recorded, "workflow": {"status": "RUNNING" if next_step else "COMPLETED", "next": next_step}}
+        if next_step is None:
+            raise HTTPException(409, "workflow could not determine next step")
+        return {"ok": True, "result": recorded, "workflow": {"status": "RUNNING", "next": next_step}}
     if isinstance(workflow, dict) and workflow_state == "RUNNING" and step_index >= 0:
         active_workflow = durable_workflow or workflow
         decision = decide_retry(active_workflow, step_index=step_index, success=request.success, verified=effective_verified)
