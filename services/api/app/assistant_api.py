@@ -124,13 +124,57 @@ def device_workflow(request: DeviceWorkflowRequest, owner_id: str = Depends(owne
         raise HTTPException(404, str(exc)) from exc
     if any(step["capability"] not in set(device["capabilities"]) for step in steps):
         raise HTTPException(403, "one or more workflow capabilities are not granted on this device")
-    workflow = {"steps": steps, "next_index": 1, "max_retries": 1}
+    workflow_id = str(uuid4())
+    workflow = {"id": workflow_id, "steps": steps, "next_index": 1, "max_retries": 1, "state": "RUNNING"}
     first = steps[0]
     try:
         command = transport.enqueue(owner_id=owner_id, device_id=request.device_id, capability=first["capability"], arguments={**first["arguments"], "_workflow": workflow}, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=request.ttl_seconds)
     except CommandTransportError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"ok": True, "authorized": True, "workflow_started": True, "step_index": 0, "step_count": len(steps), "command_id": command.command_id, "capability": command.capability, "status": command.status}
+    return {"ok": True, "authorized": True, "workflow_started": True, "workflow_id": workflow_id, "step_index": 0, "step_count": len(steps), "command_id": command.command_id, "capability": command.capability, "status": command.status}
+
+@router.get("/android-workflows/{workflow_id}")
+def workflow_status(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
+    workflow = transport.workflow(workflow_id=workflow_id, owner_id=owner_id)
+    if workflow is None:
+        raise HTTPException(404, "workflow not found")
+    return {"ok": True, **workflow}
+
+@router.post("/android-workflows/{workflow_id}/pause")
+def pause_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
+    try:
+        workflow = transport.set_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state="PAUSED")
+    except CommandTransportError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if workflow is None:
+        raise HTTPException(404, "workflow not found")
+    return {"ok": True, "workflow": workflow, "state": "PAUSED"}
+
+@router.post("/android-workflows/{workflow_id}/cancel")
+def cancel_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
+    try:
+        workflow = transport.set_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state="CANCELLED")
+    except CommandTransportError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if workflow is None:
+        raise HTTPException(404, "workflow not found")
+    return {"ok": True, "workflow": workflow, "state": "CANCELLED"}
+
+@router.post("/android-workflows/{workflow_id}/resume")
+def resume_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
+    try:
+        current = transport.workflow(workflow_id=workflow_id, owner_id=owner_id)
+        if current is None or not isinstance(current.get("workflow"), dict):
+            raise HTTPException(404, "workflow not found")
+        state = current["workflow"].get("state", "RUNNING")
+        if state != "PAUSED":
+            raise HTTPException(409, f"workflow is {state.lower()}, not paused")
+        workflow = transport.set_workflow_state(workflow_id=workflow_id, owner_id=owner_id, state="RUNNING")
+    except CommandTransportError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if workflow is None:
+        raise HTTPException(404, "workflow not found")
+    return {"ok": True, "workflow": workflow, "state": "RUNNING", "message": "Workflow resumed; the next queued step will continue normally."}
 
 @router.get("/sessions")
 def sessions(limit: int = 50, owner_id: str = Depends(owner)) -> list[dict]:
