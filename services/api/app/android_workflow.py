@@ -22,7 +22,7 @@ class AndroidWorkflowPlanner:
             return [
                 AndroidWorkflowStep("OPEN_APP", {"package": "com.android.settings", "app": "Settings"}),
                 AndroidWorkflowStep("SCREEN_READ", {"maxNodes": 250}, {"contains_any": ["Wi-Fi", "Wi-Fi and internet", "Network & internet"]}),
-                AndroidWorkflowStep("SCREEN_CLICK", {"text": "Wi-Fi"}, {"screen_contains_any": ["Wi-Fi", "Wi-Fi network"]}),
+                AndroidWorkflowStep("SCREEN_CLICK", {"text": "Wi-Fi"}),
                 AndroidWorkflowStep("SCREEN_READ", {"maxNodes": 250}, {"contains_any": ["Wi-Fi", "Wi-Fi network"]}),
             ]
         raise ValueError("no bounded Android workflow is available for this request")
@@ -48,4 +48,4 @@ class AndroidWorkflowPlanner:
                         if item:
                             values.append(str(item))
         blob = " ".join(values).casefold()
-        return any(str(item).casefold() in blob for item in expected.get("contains_any", [])) or any(str(item).casefold() in blob for item in expected.get("screen_contains_any", []))
+        return any(str(item).casefold() in blob for item in expected.get("contains_any", []))
