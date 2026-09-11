@@ -16,6 +16,7 @@ from aethon.schemas import RiskClass
 from aethon.security import SafetyKernel
 from app.assistant_repository import AssistantRepository
 from app.android_workflow import AndroidWorkflowPlanner
+from app.android_workflow_recovery import decide_retry, with_attempt
 from app.language_service import detect_language
 from app.device_gateway_api import gateway
 
@@ -176,15 +177,11 @@ def resume_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
         resumed_workflow = workflow.get("workflow") or {}
         steps = resumed_workflow.get("steps", [])
         next_index = resumed_workflow.get("next_index")
-        next_command = None
         if not isinstance(steps, list) or not isinstance(next_index, int):
             raise HTTPException(409, "workflow state is invalid")
-
-        # The latest ACCEPTED command may be unclaimed or in-flight. It already
-        # represents the durable next step, so resume must not duplicate it.
+        next_command = None
         if latest and latest.get("status") == "ACCEPTED":
             return {"ok": True, "workflow": workflow, "state": "RUNNING", "next": None, "message": "Workflow resumed; existing step remains queued or in flight."}
-
         if latest and latest.get("status") == "COMPLETED":
             index = next_index
             if index >= len(steps):
@@ -206,9 +203,8 @@ def resume_workflow(workflow_id: str, owner_id: str = Depends(owner)) -> dict:
             index = max(0, next_index - 1)
             if index < len(steps):
                 decision_workflow = {**resumed_workflow, "state": "RUNNING"}
-                decision = __import__("app.android_workflow_recovery", fromlist=["decide_retry"]).decide_retry(decision_workflow, step_index=index, success=False, verified=False)
+                decision = decide_retry(decision_workflow, step_index=index, success=False, verified=False)
                 if decision.retry:
-                    from app.android_workflow_recovery import with_attempt
                     retry_workflow = with_attempt(decision_workflow, step_index=index, attempt=decision.attempt)
                     pending = transport.workflow_step_pending(workflow_id=workflow_id, owner_id=owner_id, step_index=index)
                     if pending:
@@ -244,6 +240,7 @@ def session(session_id: str, owner_id: str = Depends(owner)) -> dict:
 def history(session_id: str, limit: int = 50, owner_id: str = Depends(owner)) -> list[dict]:
     try: return repository.history(session_id, owner_id, limit)
     except ValueError as exc: raise HTTPException(400, "invalid session id") from exc
+    except Exception as exc: raise HTTPException(503, "assistant persistence unavailable") from exc
 
 @router.delete("/sessions/{session_id}")
 def archive_session(session_id: str, owner_id: str = Depends(owner)) -> dict:
