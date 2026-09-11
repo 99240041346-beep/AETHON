@@ -45,6 +45,13 @@ def test_cancelled_workflow_cannot_auto_advance_or_retry():
     assert transport.enqueued == []
 
 
+def test_terminal_workflow_has_no_next_step():
+    transport = FakeTransport()
+    workflow = {"id": "wf-1", "state": "RUNNING", "next_index": 2, "steps": [{"capability": "SCREEN_READ", "arguments": {}}]}
+    assert _enqueue_next_workflow_step(_command(workflow), "owner-1", transport) is None
+    assert transport.enqueued == []
+
+
 def test_resume_path_does_not_duplicate_an_existing_step():
     transport = FakeTransport(pending={"command_id": "existing", "capability": "SCREEN_READ", "status": "ACCEPTED"})
     workflow = {"id": "wf-1", "state": "RUNNING", "next_index": 1, "steps": [{"capability": "SCREEN_READ", "arguments": {}}]}
