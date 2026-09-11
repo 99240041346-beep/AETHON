@@ -16,7 +16,9 @@ class AssistantRepository:
     _memory_limit = 100
 
     def __init__(self, database_url: str | None = None) -> None:
-        self.database_url = database_url or os.getenv("AETHON_DATABASE_URL", "")
+        # An explicit empty string deliberately disables PostgreSQL. This is
+        # important for deterministic unit tests even when CI exports a DB URL.
+        self.database_url = os.getenv("AETHON_DATABASE_URL", "") if database_url is None else database_url
 
     @property
     def enabled(self) -> bool:
@@ -109,14 +111,14 @@ class AssistantRepository:
         if not include_archived:
             where += " AND archived_at IS NULL"
         if q:
-            where += " AND (COALESCE(title,'') ILIKE %s ESCAPE '\\\\' OR session_id::text ILIKE %s ESCAPE '\\\\')"
+            where += " AND (COALESCE(title,'') ILIKE %s ESCAPE '\\' OR session_id::text ILIKE %s ESCAPE '\\')"
             pattern = self._search_pattern(q)
             params.extend([pattern, pattern])
         params.append(limit)
         with psycopg.connect(self.database_url) as conn:
-            rows = conn.execute(f"""SELECT session_id, project_id, title, language, archived_at, created_at, updated_at
+            rows = conn.execute(f"""SELECT session_id, owner_id, project_id, title, language, archived_at, created_at, updated_at
                 FROM assistant_sessions WHERE {where} ORDER BY updated_at DESC LIMIT %s""", params).fetchall()
-        return [{"session_id": str(r[0]), "project_id": r[1], "title": r[2], "language": r[3], "archived_at": r[4].isoformat() if r[4] else None, "created_at": r[5].isoformat() if hasattr(r[5], "isoformat") else str(r[5]), "updated_at": r[6].isoformat() if hasattr(r[6], "isoformat") else str(r[6])} for r in rows]
+        return [{"session_id": str(r[0]), "owner_id": r[1], "project_id": r[2], "title": r[3], "language": r[4], "archived_at": r[5].isoformat() if r[5] else None, "created_at": r[6].isoformat() if hasattr(r[6], "isoformat") else str(r[6]), "updated_at": r[7].isoformat() if hasattr(r[7], "isoformat") else str(r[7])} for r in rows]
 
     def search_sessions(self, owner_id: str, query: str, limit: int = 50) -> list[dict]:
         return self.sessions(owner_id, limit=limit, include_archived=True, query=query)
@@ -126,11 +128,11 @@ class AssistantRepository:
             session = self._memory_sessions.get(session_id)
             return dict(session) if session and session.get("owner_id") == owner_id else None
         with psycopg.connect(self.database_url) as conn:
-            row = conn.execute("""SELECT session_id, project_id, title, language, archived_at, created_at, updated_at
+            row = conn.execute("""SELECT session_id, owner_id, project_id, title, language, archived_at, created_at, updated_at
                 FROM assistant_sessions WHERE session_id=%s AND owner_id=%s""", (UUID(session_id), owner_id)).fetchone()
         if not row:
             return None
-        return {"session_id": str(row[0]), "project_id": row[1], "title": row[2], "language": row[3], "archived_at": row[4].isoformat() if row[4] else None, "created_at": row[5].isoformat() if hasattr(row[5], "isoformat") else str(row[5]), "updated_at": row[6].isoformat() if hasattr(row[6], "isoformat") else str(row[6])}
+        return {"session_id": str(row[0]), "owner_id": row[1], "project_id": row[2], "title": row[3], "language": row[4], "archived_at": row[5].isoformat() if row[5] else None, "created_at": row[6].isoformat() if hasattr(row[6], "isoformat") else str(row[6]), "updated_at": row[7].isoformat() if hasattr(row[7], "isoformat") else str(row[7])}
 
     def rename_session(self, session_id: str, owner_id: str, title: str) -> bool:
         title = title.strip()
