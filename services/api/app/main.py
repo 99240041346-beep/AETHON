@@ -90,9 +90,26 @@ def execute_tool(request: ToolRequest, owner_id: str = Depends(owner)):
     if authorization.effective_decision != 'ALLOW':
         raise HTTPException(403, 'execution blocked by safety policy')
     result = tools.execute(request)
+    # Preserve the established API contract while exposing the richer ToolResult.
+    # Tool failures are normal execution outcomes, not gateway failures.
     if not result.ok:
-        raise HTTPException(502, result.error or 'tool execution failed')
-    return {'ok': True, 'owner_id': owner_id, 'tool': request.tool, 'result': result.output}
+        return {
+            'ok': False,
+            'owner_id': owner_id,
+            'tool': request.tool,
+            'error': result.error or 'tool execution failed',
+            'request_id': str(result.request_id or request.request_id),
+            'verified': result.verified,
+        }
+    return {
+        'ok': True,
+        'owner_id': owner_id,
+        'tool': request.tool,
+        'result': result.output,
+        'output': result.output,
+        'request_id': str(result.request_id or request.request_id),
+        'verified': result.verified,
+    }
 
 @app.post('/v1/memory')
 def create_memory(request: MemoryWriteRequest, owner_id: str = Depends(owner)):
