@@ -52,6 +52,9 @@ def _enqueue_step(command: dict[str, Any], owner_id: str, transport: AndroidComm
     arguments = step.get("arguments", {})
     if capability not in _ALLOWED or not isinstance(arguments, dict):
         return None
+    pending = transport.workflow_step_pending(workflow_id=str(workflow.get("id", "")), owner_id=owner_id, step_index=index)
+    if pending:
+        return {"command_id": pending["command_id"], "step_index": index, "step_count": len(steps), "capability": pending["capability"], "status": pending["status"]}
     next_workflow = {**workflow, "next_index": index + 1}
     next_command = transport.enqueue(owner_id=owner_id, device_id=command["device_id"], capability=capability, arguments={**arguments, "_workflow": next_workflow}, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=15)
     return {"command_id": next_command.command_id, "step_index": index, "step_count": len(steps), "capability": capability, "status": next_command.status}
@@ -119,17 +122,21 @@ def result(device_id: str, request: ResultRequest, authorization: str | None = H
     try:
         recorded = transport.record_result(command_id=request.command_id, device_id=device_id, owner_id=device.owner_id, success=request.success, verified=effective_verified, result=request.result, verification=request.verification, error=request.error or ("semantic verification failed" if not semantic_verified else None))
     except CommandTransportError as exc: raise HTTPException(409, str(exc)) from exc
-    workflow_state = workflow.get("state", "RUNNING") if isinstance(workflow, dict) else None
+
+    durable = transport.workflow(workflow_id=str(workflow.get("id")), owner_id=device.owner_id) if isinstance(workflow, dict) and workflow.get("id") else None
+    durable_workflow = durable.get("workflow") if isinstance(durable, dict) else None
+    workflow_state = durable_workflow.get("state", "RUNNING") if isinstance(durable_workflow, dict) else None
     if recorded["status"] == "COMPLETED":
         if not isinstance(workflow, dict) or workflow_state != "RUNNING":
             return {"ok": True, "result": recorded, "workflow": {"status": workflow_state or "COMPLETED", "next": None}}
-        try: next_step = _enqueue_next_workflow_step(command, device.owner_id, transport)
+        try: next_step = _enqueue_next_workflow_step({**command, "arguments": {**command.get("arguments", {}), "_workflow": durable_workflow}}, device.owner_id, transport)
         except CommandTransportError as exc: raise HTTPException(409, "workflow could not advance") from exc
         return {"ok": True, "result": recorded, "workflow": {"status": "RUNNING" if next_step else "COMPLETED", "next": next_step}}
     if isinstance(workflow, dict) and workflow_state == "RUNNING" and step_index >= 0:
-        decision = decide_retry(workflow, step_index=step_index, success=request.success, verified=effective_verified)
+        active_workflow = durable_workflow or workflow
+        decision = decide_retry(active_workflow, step_index=step_index, success=request.success, verified=effective_verified)
         if decision.retry:
-            try: retry = _retry_workflow_step(command, device.owner_id, transport, step_index=step_index, attempt=decision.attempt)
+            try: retry = _retry_workflow_step({**command, "arguments": {**command.get("arguments", {}), "_workflow": active_workflow}}, device.owner_id, transport, step_index=step_index, attempt=decision.attempt)
             except CommandTransportError as exc: raise HTTPException(409, "workflow retry could not be queued") from exc
             return {"ok": True, "result": recorded, "workflow": {"status": "RETRYING", "attempt": decision.attempt, "max_retries": 2, "reason": decision.reason, "next": retry}}
     return {"ok": True, "result": recorded, "workflow": {"status": workflow_state or "FAILED", "next": None}}
