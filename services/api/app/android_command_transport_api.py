@@ -52,12 +52,16 @@ def _enqueue_step(command: dict[str, Any], owner_id: str, transport: AndroidComm
     arguments = step.get("arguments", {})
     if capability not in _ALLOWED or not isinstance(arguments, dict):
         return None
-    pending = transport.workflow_step_pending(workflow_id=str(workflow.get("id", "")), owner_id=owner_id, step_index=index)
-    if pending:
-        return {"command_id": pending["command_id"], "step_index": index, "step_count": len(steps), "capability": pending["capability"], "status": pending["status"]}
     next_workflow = {**workflow, "next_index": index + 1}
-    next_command = transport.enqueue(owner_id=owner_id, device_id=command["device_id"], capability=capability, arguments={**arguments, "_workflow": next_workflow}, nonce=secrets.token_urlsafe(24), approved=True, ttl_seconds=15)
-    return {"command_id": next_command.command_id, "step_index": index, "step_count": len(steps), "capability": capability, "status": next_command.status}
+    next_command = transport.enqueue_workflow_step(
+        owner_id=owner_id,
+        device_id=command["device_id"],
+        capability=capability,
+        arguments=arguments,
+        workflow=next_workflow,
+        ttl_seconds=15,
+    )
+    return {"command_id": next_command.command_id, "step_index": index, "step_count": len(steps), "capability": next_command.capability, "status": next_command.status}
 
 def _enqueue_next_workflow_step(command: dict[str, Any], owner_id: str, transport: AndroidCommandTransport) -> dict[str, Any] | None:
     workflow = command.get("arguments", {}).get("_workflow")
