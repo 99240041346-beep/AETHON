@@ -13,12 +13,15 @@ class FakeRuntime:
     def run(self, **kwargs):
         event = SimpleNamespace(
             type="runtime.completed",
-            request_id="req-test",
+            request_id=kwargs.get("request_id") or "req-test",
             data={"stage": "response"},
         )
+        callback = kwargs.get("event_callback")
+        if callback is not None:
+            callback(event)
         return SimpleNamespace(
             error=None,
-            request_id="req-test",
+            request_id=event.request_id,
             session_id=kwargs.get("session_id") or "session-test",
             mode="CHAT",
             intent=SimpleNamespace(action="chat"),
@@ -49,7 +52,7 @@ def test_runtime_respond_is_authenticated_and_returns_contract(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["request_id"] == "req-test"
+    assert body["request_id"]
     assert body["session_id"] == "session-test"
     assert body["response"] == "test response"
     assert body["events"][0]["type"] == "runtime.completed"
@@ -97,7 +100,7 @@ def test_runtime_stream_emits_started_progress_and_completed(monkeypatch):
     assert "event: started" in response.text
     assert "event: progress" in response.text
     assert "event: completed" in response.text
-    assert '"request_id": "req-test"' in response.text
+    assert '"request_id": "' in response.text
 
 
 def test_runtime_stream_does_not_leak_exception_details(monkeypatch):
@@ -130,7 +133,7 @@ def _events(body: str):
     return events
 
 
-def test_runtime_stream_payloads_are_valid_json(monkeypatch):
+def test_runtime_stream_payloads_are_valid_json_and_share_request_id(monkeypatch):
     test_client = client(monkeypatch)
     try:
         response = test_client.post(
@@ -141,5 +144,8 @@ def test_runtime_stream_payloads_are_valid_json(monkeypatch):
         app.dependency_overrides.clear()
 
     events = _events(response.text)
+    request_ids = [event.get("request_id") for event in events if event.get("request_id")]
     assert events[0]["status"] == "started"
     assert events[-1]["ok"] is True
+    assert len(set(request_ids)) == 1
+    assert events[-1]["request_id"] == events[0]["request_id"]
