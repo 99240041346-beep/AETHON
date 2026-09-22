@@ -23,6 +23,7 @@ class WorkerLeaseStore:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(path, check_same_thread=False)
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS worker_leases (task_id TEXT PRIMARY KEY, worker_id TEXT NOT NULL, lease_token TEXT NOT NULL, acquired_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL, expires_at REAL NOT NULL)"
         )
@@ -42,18 +43,24 @@ class WorkerLeaseStore:
         token = uuid.uuid4().hex
         now = self._now()
         with self._lock:
-            row = self._conn.execute(
-                "SELECT worker_id, expires_at FROM worker_leases WHERE task_id=?", (task_id,)
-            ).fetchone()
-            if row and row[1] > now:
-                if row[0] == worker_id:
-                    raise LeaseConflict("task is already leased by this worker")
-                raise LeaseConflict("another worker already holds the task lease")
-            self._conn.execute(
-                "INSERT INTO worker_leases(task_id,worker_id,lease_token,acquired_at,heartbeat_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET worker_id=excluded.worker_id, lease_token=excluded.lease_token, acquired_at=excluded.acquired_at, heartbeat_at=excluded.heartbeat_at, expires_at=excluded.expires_at",
-                (task_id, worker_id, token, self._iso(), self._iso(), now + ttl_seconds),
-            )
-            self._conn.commit()
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT worker_id, expires_at FROM worker_leases WHERE task_id=?", (task_id,)
+                ).fetchone()
+                if row and row[1] > now:
+                    self._conn.rollback()
+                    if row[0] == worker_id:
+                        raise LeaseConflict("task is already leased by this worker")
+                    raise LeaseConflict("another worker already holds the task lease")
+                self._conn.execute(
+                    "INSERT INTO worker_leases(task_id,worker_id,lease_token,acquired_at,heartbeat_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET worker_id=excluded.worker_id, lease_token=excluded.lease_token, acquired_at=excluded.acquired_at, heartbeat_at=excluded.heartbeat_at, expires_at=excluded.expires_at",
+                    (task_id, worker_id, token, self._iso(), self._iso(), now + ttl_seconds),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
         return token
 
     def heartbeat(self, task_id: str, worker_id: str, lease_token: str, ttl_seconds: float = 30.0) -> bool:
@@ -80,7 +87,8 @@ class WorkerLeaseStore:
             return cursor.rowcount
 
     def get(self, task_id: str) -> dict[str, object] | None:
-        row = self._conn.execute("SELECT task_id,worker_id,lease_token,acquired_at,heartbeat_at,expires_at FROM worker_leases WHERE task_id=?", (task_id,)).fetchone()
+        with self._lock:
+            row = self._conn.execute("SELECT task_id,worker_id,lease_token,acquired_at,heartbeat_at,expires_at FROM worker_leases WHERE task_id=?", (task_id,)).fetchone()
         if not row:
             return None
         return {"task_id": row[0], "worker_id": row[1], "lease_token": row[2], "acquired_at": row[3], "heartbeat_at": row[4], "expires_at": row[5], "expired": row[5] <= self._now()}
