@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from aethon.auth import current_owner, security
-from app.assistant_runtime import AssistantRuntime
+from app.assistant_runtime import AssistantRuntime, RuntimeEvent
 from app.language_service import detect_language
 
 router = APIRouter(prefix="/v1/assistant/runtime", tags=["assistant-runtime"])
@@ -48,6 +49,10 @@ def _result_payload(result, language: str) -> dict:
     }
 
 
+def _progress_payload(event: RuntimeEvent) -> dict:
+    return {"type": event.type, "request_id": event.request_id, "data": event.data}
+
+
 @router.post("/respond")
 def runtime_respond(request: RuntimeAssistantRequest, owner_id: str = Depends(owner)) -> dict:
     profile = detect_language(request.text, request.language)
@@ -61,6 +66,7 @@ def runtime_respond(request: RuntimeAssistantRequest, owner_id: str = Depends(ow
             project_id=request.project_id,
             execute_tools=request.execute_tools,
             require_approval=request.require_approval,
+            request_id=str(uuid4()),
         )
     except PermissionError as exc:
         raise HTTPException(403, "session belongs to another owner") from exc
@@ -76,33 +82,70 @@ def runtime_respond(request: RuntimeAssistantRequest, owner_id: str = Depends(ow
 async def runtime_stream(request: RuntimeAssistantRequest, owner_id: str = Depends(owner)) -> StreamingResponse:
     profile = detect_language(request.text, request.language)
     language = profile.tts_locale
+    request_id = str(uuid4())
 
     async def events():
-        yield "event: started\ndata: " + json.dumps({"status": "started", "language": language}) + "\n\n"
+        queue: asyncio.Queue[RuntimeEvent] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def on_event(event: RuntimeEvent) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, event)
+
+        yield "event: started\ndata: " + json.dumps(
+            {"status": "started", "request_id": request_id, "language": language},
+            ensure_ascii=False,
+        ) + "\n\n"
+
+        task = asyncio.create_task(asyncio.to_thread(
+            runtime.run,
+            owner_id=owner_id,
+            session_id=request.session_id,
+            text=request.text,
+            language=language,
+            project_id=request.project_id,
+            execute_tools=request.execute_tools,
+            require_approval=request.require_approval,
+            request_id=request_id,
+            event_callback=on_event,
+        ))
+
         try:
-            result = await asyncio.to_thread(
-                runtime.run,
-                owner_id=owner_id,
-                session_id=request.session_id,
-                text=request.text,
-                language=language,
-                project_id=request.project_id,
-                execute_tools=request.execute_tools,
-                require_approval=request.require_approval,
-            )
-            for event in result.events:
-                payload = {"type": event.type, "request_id": event.request_id, "data": event.data}
-                yield "event: progress\ndata: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
-            yield "event: completed\ndata: " + json.dumps(_result_payload(result, language), ensure_ascii=False) + "\n\n"
+            while not task.done() or not queue.empty():
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
+                yield "event: progress\ndata: " + json.dumps(
+                    _progress_payload(event), ensure_ascii=False
+                ) + "\n\n"
+
+            result = await task
+            yield "event: completed\ndata: " + json.dumps(
+                _result_payload(result, language), ensure_ascii=False
+            ) + "\n\n"
         except PermissionError:
-            yield "event: error\ndata: " + json.dumps({"error": "session belongs to another owner"}) + "\n\n"
+            if not task.done():
+                task.cancel()
+            yield "event: error\ndata: " + json.dumps(
+                {"request_id": request_id, "error": "session belongs to another owner"},
+                ensure_ascii=False,
+            ) + "\n\n"
         except ValueError as exc:
-            yield "event: error\ndata: " + json.dumps({"error": str(exc)}) + "\n\n"
+            yield "event: error\ndata: " + json.dumps(
+                {"request_id": request_id, "error": str(exc)}, ensure_ascii=False
+            ) + "\n\n"
         except Exception:
-            yield "event: error\ndata: " + json.dumps({"error": "assistant runtime unavailable"}) + "\n\n"
+            yield "event: error\ndata: " + json.dumps(
+                {"request_id": request_id, "error": "assistant runtime unavailable"},
+                ensure_ascii=False,
+            ) + "\n\n"
 
     return StreamingResponse(
         events(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
