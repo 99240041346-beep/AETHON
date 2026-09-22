@@ -52,11 +52,15 @@ class AssistantRuntime:
         self.safety_gate = safety_gate or SafetyExecutionGate(SafetyKernel())
         self.event_sink = event_sink
 
-    def _emit(self, events: list[RuntimeEvent], event_type: str, request_id: str, **data: Any) -> None:
+    def _emit(self, events: list[RuntimeEvent], event_type: str, request_id: str,
+              event_callback: Callable[[RuntimeEvent], None] | None = None,
+              **data: Any) -> None:
         event = RuntimeEvent(event_type, request_id, data)
         events.append(event)
         if self.event_sink is not None:
             self.event_sink(event)
+        if event_callback is not None:
+            event_callback(event)
 
     @staticmethod
     def _context(history: list[dict[str, Any]], limit: int = 12) -> str:
@@ -74,13 +78,14 @@ class AssistantRuntime:
         return None
 
     def _tool(self, request: ToolRequest, intent: AssistantIntent, session_id: str,
-              request_id: str, events: list[RuntimeEvent], require_approval: bool) -> RuntimeResult:
+              request_id: str, events: list[RuntimeEvent], require_approval: bool,
+              event_callback: Callable[[RuntimeEvent], None] | None = None) -> RuntimeResult:
         spec = next((item for item in self.tools.list() if item.name == request.tool), None)
-        self._emit(events, "tool.selected", request_id, tool=request.tool)
+        self._emit(events, "tool.selected", request_id, event_callback, tool=request.tool)
         if spec is None:
             return RuntimeResult(request_id, session_id, intent.mode, intent, "Tool not found.", events=tuple(events), error="tool not found")
         if spec.side_effects and not require_approval:
-            self._emit(events, "approval.required", request_id, tool=spec.name, risk=spec.risk.value)
+            self._emit(events, "approval.required", request_id, event_callback, tool=spec.name, risk=spec.risk.value)
             return RuntimeResult(request_id, session_id, intent.mode, intent,
                                  "This tool can change external state and requires your explicit approval before execution.",
                                  events=tuple(events), requires_confirmation=True)
@@ -89,12 +94,13 @@ class AssistantRuntime:
             if getattr(authorization, "effective_decision", "ALLOW") != "ALLOW":
                 raise ExecutionAuthorizationError("execution blocked by safety policy")
         except ExecutionAuthorizationError as exc:
-            self._emit(events, "execution.blocked", request_id, tool=spec.name)
+            self._emit(events, "execution.blocked", request_id, event_callback, tool=spec.name)
             return RuntimeResult(request_id, session_id, intent.mode, intent,
                                  "This action was blocked by AETHON's safety policy.", events=tuple(events), error=str(exc))
-        self._emit(events, "tool.started", request_id, tool=spec.name)
+        self._emit(events, "tool.started", request_id, event_callback, tool=spec.name)
         result = self.tools.execute(request)
-        self._emit(events, "tool.completed", request_id, tool=spec.name, ok=result.ok, verified=result.verified)
+        self._emit(events, "tool.completed", request_id, event_callback,
+                   tool=spec.name, ok=result.ok, verified=result.verified)
         response = str(result.output) if result.ok else f"I couldn't complete that tool request: {result.error or 'unknown error'}"
         return RuntimeResult(request_id, session_id, intent.mode, intent, response, result, tuple(events),
                              verified=result.verified,
@@ -103,18 +109,20 @@ class AssistantRuntime:
 
     def run(self, *, owner_id: str, session_id: str | None, text: str,
             language: str = "te-IN", project_id: str | None = None,
-            execute_tools: bool = True, require_approval: bool = False) -> RuntimeResult:
+            execute_tools: bool = True, require_approval: bool = False,
+            request_id: str | None = None,
+            event_callback: Callable[[RuntimeEvent], None] | None = None) -> RuntimeResult:
         if not text.strip():
             raise ValueError("assistant input cannot be empty")
-        request_id = str(uuid4())
+        request_id = request_id or str(uuid4())
         events: list[RuntimeEvent] = []
         session_id = session_id or str(uuid4())
         self.repository.ensure_session(session_id, owner_id, language, project_id)
         history = self.repository.history(session_id, owner_id, limit=12)
         self.repository.add_message(session_id, owner_id, "user", text, language)
-        self._emit(events, "context.loaded", request_id, messages=len(history))
+        self._emit(events, "context.loaded", request_id, event_callback, messages=len(history))
         intent = self.orchestrator.classify(text)
-        self._emit(events, "intent.classified", request_id, mode=intent.mode.value, action=intent.action)
+        self._emit(events, "intent.classified", request_id, event_callback, mode=intent.mode.value, action=intent.action)
 
         if intent.mode is AssistantMode.ACTION:
             response = self.orchestrator.respond(text, language=language).text
@@ -122,7 +130,8 @@ class AssistantRuntime:
                                         intent=intent.action, action=intent.action,
                                         status="AWAITING_APPROVAL" if intent.requires_confirmation else "PLANNED",
                                         metadata={"request_id": request_id, "verified": False})
-            self._emit(events, "action.planned", request_id, requires_confirmation=intent.requires_confirmation)
+            self._emit(events, "action.planned", request_id, event_callback,
+                       requires_confirmation=intent.requires_confirmation)
             return RuntimeResult(request_id, session_id, intent.mode, intent, response,
                                  events=tuple(events), requires_confirmation=intent.requires_confirmation)
 
@@ -130,7 +139,7 @@ class AssistantRuntime:
         if tool is not None and execute_tools:
             tool_name, arguments = tool
             result = self._tool(ToolRequest(tool=tool_name, arguments=arguments, request_id=UUID(request_id)),
-                                intent, session_id, request_id, events, require_approval)
+                                intent, session_id, request_id, events, require_approval, event_callback)
             status = "AWAITING_APPROVAL" if result.requires_confirmation else (
                 "VERIFIED" if result.verified else ("SUCCEEDED" if result.tool_result and result.tool_result.ok else "FAILED"))
             self.repository.add_message(session_id, owner_id, "assistant", result.response, language,
@@ -151,9 +160,9 @@ class AssistantRuntime:
         except Exception as exc:
             response = "I couldn't reach the configured AI model, so I did not pretend the request succeeded."
             status = "FAILED"
-            self._emit(events, "model.failed", request_id, error=str(exc)[:300])
+            self._emit(events, "model.failed", request_id, event_callback, error=str(exc)[:300])
         self.repository.add_message(session_id, owner_id, "assistant", response, language,
                                     status=status, metadata={"request_id": request_id, "verified": False})
-        self._emit(events, "response.ready", request_id, status=status)
+        self._emit(events, "response.ready", request_id, event_callback, status=status)
         return RuntimeResult(request_id, session_id, intent.mode, intent, response,
                              events=tuple(events), error=None if status == "SUCCEEDED" else "model generation failed")
