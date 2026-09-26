@@ -113,3 +113,13 @@ def test_model_failure_is_truthful_and_persisted():
     assert result.response.startswith("I couldn't reach the configured AI model")
     assert any(event.type == "model.failed" for event in result.events)
     assert rt.repository.history("s4", "owner-a")[-1]["status"] == "FAILED"
+
+
+def test_new_conversation_gets_safe_local_title():
+    rt = runtime()
+    result = rt.run(owner_id="owner-title", session_id="title-1", text="Build a weather dashboard for farmers", language="en-IN")
+
+    assert result.session_id == "title-1"
+    session = rt.repository.session("title-1", "owner-title")
+    assert session is not None
+    assert session["title"] == "Build a weather dashboard for farmers"
