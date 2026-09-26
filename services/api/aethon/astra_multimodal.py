@@ -19,7 +19,7 @@ class ASTRAMultimodal:
     def build_packet(self, inputs: list[MediaInput], *, owner_id: str | None = None) -> MultimodalPacket:
         if not inputs or len(inputs) > 12:
             raise ValueError("inputs must contain between 1 and 12 media items")
-        return MultimodalPacket(inputs=inputs, owner_id=owner_id)
+        return self.engine.build_context(inputs)
 
     @staticmethod
     def observation(modality: Modality, content: Any, **metadata: Any) -> ASTRAObservation:
