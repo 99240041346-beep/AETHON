@@ -4,13 +4,14 @@ import asyncio
 import json
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from aethon.auth import current_owner, security
 from app.assistant_runtime import AssistantRuntime, RuntimeEvent
 from app.language_service import detect_language
+from app.attachment_store import create_attachment, get_attachment
 
 router = APIRouter(prefix="/v1/assistant/runtime", tags=["assistant-runtime"])
 runtime = AssistantRuntime()
@@ -25,6 +26,7 @@ class RuntimeAssistantRequest(BaseModel):
     project_id: str | None = Field(default=None, max_length=100)
     execute_tools: bool = True
     require_approval: bool = False
+    attachment_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
 def owner(credentials=Depends(security)) -> str:
@@ -54,6 +56,38 @@ def _result_payload(result, language: str) -> dict:
 def _progress_payload(event: RuntimeEvent) -> dict:
     return {"type": event.type, "request_id": event.request_id, "data": event.data}
 
+@router.post("/attachments")
+async def upload_attachment(file: UploadFile = File(...), owner_id: str = Depends(owner)) -> dict:
+    try:
+        raw = await file.read()
+        item = create_attachment(
+            owner_id=owner_id,
+            filename=file.filename or "attachment",
+            media_type=file.content_type or "application/octet-stream",
+            raw=raw,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "ok": True,
+        "attachment_id": item.attachment_id,
+        "filename": item.filename,
+        "media_type": item.media_type,
+        "size": item.size,
+        "sha256": item.sha256,
+        "kind": item.kind,
+        "text_available": item.text is not None,
+    }
+
+@router.get("/attachments/{attachment_id}")
+def attachment_info(attachment_id: str, owner_id: str = Depends(owner)) -> dict:
+    item = get_attachment(attachment_id, owner_id)
+    if item is None:
+        raise HTTPException(404, "attachment not found")
+    return {"ok": True, "attachment_id": item.attachment_id, "filename": item.filename,
+            "media_type": item.media_type, "size": item.size, "sha256": item.sha256,
+            "kind": item.kind, "text_available": item.text is not None}
+
 
 @router.post("/respond")
 def runtime_respond(request: RuntimeAssistantRequest, owner_id: str = Depends(owner)) -> dict:
@@ -68,6 +102,7 @@ def runtime_respond(request: RuntimeAssistantRequest, owner_id: str = Depends(ow
             project_id=request.project_id,
             execute_tools=request.execute_tools,
             require_approval=request.require_approval,
+            attachment_ids=request.attachment_ids,
             request_id=str(uuid4()),
         )
     except PermissionError as exc:
@@ -107,6 +142,7 @@ async def runtime_stream(request: RuntimeAssistantRequest, owner_id: str = Depen
             project_id=request.project_id,
             execute_tools=request.execute_tools,
             require_approval=request.require_approval,
+            attachment_ids=request.attachment_ids,
             request_id=request_id,
             event_callback=on_event,
         ))
