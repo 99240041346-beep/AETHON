@@ -9,9 +9,9 @@ EXECUTE = (Permission.READ, Permission.EXECUTE)
 EXTERNAL = (Permission.READ, Permission.EXTERNAL_ACTION)
 
 BUILTIN_AGENTS = {
-    "research": AgentDefinition("research", "ResearchAgent", "Find, compare and synthesize sourced information.", tools=("web.search", "web.fetch"), permissions=READ, max_steps=16),
+    "research": AgentDefinition("research", "ResearchAgent", "Find, compare and synthesize sourced information.", tools=("web_search", "web_fetch", "web_research"), permissions=READ, max_steps=16),
     "coding": AgentDefinition("coding", "CodingAgent", "Inspect, patch and verify source code in a bounded workspace.", tools=("files.read", "files.patch", "sandbox.test"), permissions=EXECUTE, max_steps=24),
-    "data": AgentDefinition("data", "DataAgent", "Analyze structured datasets and produce verified results.", tools=("files.read", "data.analyze", "chart.create"), permissions=READ, max_steps=16),
+    "data": AgentDefinition("data", "DataAgent", "Analyze structured datasets and produce verified results.", tools=("data_analyze", "chart"), permissions=READ, max_steps=16),
     "document": AgentDefinition("document", "DocumentAgent", "Generate and validate user-requested documents.", tools=("files.read", "document.generate"), permissions=WRITE, max_steps=12),
     "writing": AgentDefinition("writing", "WritingAgent", "Draft, rewrite and review user-provided content.", tools=("context.read",), permissions=READ, max_steps=10),
     "study": AgentDefinition("study", "StudyAgent", "Teach, quiz and track study-session outputs.", tools=("context.read",), permissions=READ, max_steps=12),
