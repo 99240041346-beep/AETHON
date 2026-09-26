@@ -9,7 +9,7 @@ AgentRuntime/ToolRegistry so we do not create a second execution engine.
 
 from dataclasses import dataclass
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from aethon.agent import AgentRuntime
 from aethon.agent_catalog import BUILTIN_AGENTS, get_builtin_agent
@@ -65,7 +65,7 @@ class ASTRARuntime:
         # authorization, execution, checkpointing and verification. The
         # definition is used here to validate the requested ASTRA agent.
         task = Task(
-            task_id=task_id or UUID(int=__import__("uuid").uuid4().int),
+            task_id=task_id or uuid4(),
             goal=goal.strip(),
             project_id=project_id,
             priority=priority,
