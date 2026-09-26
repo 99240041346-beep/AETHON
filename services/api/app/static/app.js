@@ -1,43 +1,389 @@
-const $=s=>document.querySelector(s);
-const state={session:null,busy:false,sessions:[],token:localStorage.getItem("aethon_token")||"",controller:null,lastPrompt:""};
-const $all=s=>Array.from(document.querySelectorAll(s));
-const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-function auth(){return state.token?{"Authorization":"Bearer "+state.token}:{}}
-async function api(path,opt={}){opt.headers={...(opt.headers||{}),...auth(),"Content-Type":"application/json"};const r=await fetch(path,opt);if(!r.ok)throw new Error((await r.text()).slice(0,500)||r.statusText);return r.json()}
-function renderText(text){let x=esc(text);x=x.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g,(_,c)=>"<pre><code>"+c+"</code></pre>");x=x.replace(/\*\*(.*?)\*\*/g,"<strong>$1</strong>").replace(/\`([^\`]+)\`/g,"<code>$1</code>");x=x.replace(/^[-*] (.*)$/gm,"• $1");return x.split(/\\n{2,}/).map(p=>"<p>"+p.replace(/\\n/g,"<br>")+"</p>").join("")}
-function addMessage(role,text,events=[]){const box=$("#messages"),el=document.createElement("article");el.className="message "+role;el.innerHTML='<div class="avatar">'+(role==="user"?"YOU":"A")+'</div><div class="bubble"><div class="message-name">'+(role==="user"?"You":"AETHON")+'</div><div class="content">'+renderText(text)+'</div>'+events.map(e=>'<div class="event">• '+esc(e)+'</div>').join("")+"</div>";box.appendChild(el);box.scrollTop=box.scrollHeight;return el}
-function setBusy(v){state.busy=v;$("#send").disabled=false;$("#send").textContent=v?"■":"↑";$("#send").title=v?"Stop generation":"Send";$("#typing").classList.toggle("on",v)}
-function showWelcome(v){$("#welcome").style.display=v?"block":"none";$("#messages").style.display=v?"none":"block"}
-async function loadSessions(query=""){try{const endpoint=query?"/v1/assistant/sessions/search?q="+encodeURIComponent(query)+"&limit=50":"/v1/assistant/sessions?limit=50";const d=await api(endpoint);state.sessions=d.sessions||d||[];$("#sessions").innerHTML=state.sessions.map(s=>'<div class="session '+(s.session_id===state.session?"active":"")+'" data-id="'+esc(s.session_id)+'"><span>◌</span><span class="session-title">'+esc(s.title||"New conversation")+'</span><button class="session-delete" data-delete="'+esc(s.session_id)+'">×</button></div>').join("")}catch{}}
-async function openSession(id){state.session=id;showWelcome(false);$("#messages").innerHTML="";try{const d=await api("/v1/assistant/sessions/"+encodeURIComponent(id)+"/messages");const msgs=d.messages||d||[];msgs.forEach(m=>addMessage(m.role==="user"?"user":"assistant",m.content));const s=state.sessions.find(x=>x.session_id===id);$("#chatTitle").textContent=s?.title||"Conversation"}catch(e){addMessage("assistant","I could not load this conversation: "+e.message)}await loadSessions()}
-function newChat(){state.session=null;$("#chatTitle").textContent="AETHON";$("#messages").innerHTML="";showWelcome(true);loadSessions();$("#input").focus()}
-function messageTools(el,prompt){
- if(!el||el.dataset.tools)return; el.dataset.tools="1";
- const tools=document.createElement("div");tools.className="message-tools";
- const add=(label,fn)=>{const b=document.createElement("button");b.className="message-tool";b.textContent=label;b.onclick=fn;tools.appendChild(b)};
- add("Copy",()=>navigator.clipboard?.writeText(el.querySelector(".content")?.innerText||""));
- if(prompt)add("Edit",()=>{ $("#input").value=prompt;$("#input").focus();$("#input").dispatchEvent(new Event("input")); });
- if(prompt)add("Regenerate",()=>send(prompt,true));
- boxSafeAppend(el,tools);
-}
-function boxSafeAppend(el,node){el.querySelector(".bubble").appendChild(node)}
-function exportConversation(){
- const rows=$all("#messages .message").map(m=>({role:m.classList.contains("user")?"You":"AETHON",text:m.querySelector(".content")?.innerText||""}));
- if(!rows.length)return;
- const body=rows.map(x=>"## "+x.role+"
+(() => {
+  "use strict";
 
-"+x.text).join("\\n\\n");
- const blob=new Blob([body],{type:"text/markdown"}),url=URL.createObjectURL(blob),a=document.createElement("a");
- a.href=url;a.download=(state.sessions.find(s=>s.session_id===state.session)?.title||"aethon-conversation")+".md";a.click();URL.revokeObjectURL(url);
-}
-function setAssistantText(el,text){const content=el?.querySelector(".content");if(content)content.innerHTML=renderText(text||"");}
-async function send(text,regenerate=false){text=(text||$("#input").value).trim();if(!text||state.busy)return;state.lastPrompt=text;$("#input").value="";$("#input").style.height="auto";showWelcome(false);if(!regenerate)addMessage("user",text);setBusy(true);const assistant=addMessage("assistant","");const content=assistant.querySelector(".content");let events=[];try{state.controller=new AbortController();const r=await fetch("/v1/assistant/runtime/stream",{method:"POST",headers:{"Content-Type":"application/json",...auth()},body:JSON.stringify({text,session_id:state.session,execute_tools:true,require_approval:false}),signal:state.controller.signal});if(!r.ok)throw new Error((await r.text()).slice(0,500));const reader=r.body.getReader(),dec=new TextDecoder();let buf="";while(true){const {value,done}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});const chunks=buf.split("\\n\\n");buf=chunks.pop();for(const chunk of chunks){const dm=chunk.split("\\n").find(x=>x.startsWith("data: "));if(!dm)continue;let d;try{d=JSON.parse(dm.slice(6))}catch{continue}if(chunk.startsWith("event: progress")){const t=d.data?.message||d.data?.status||d.type;if(t&&!events.includes(t)){events.push(t);assistant.querySelector(".bubble").insertAdjacentHTML("beforeend",'<div class="event">• '+esc(t)+'</div>')}}else if(chunk.startsWith("event: completed")){if(d.session_id)state.session=d.session_id;content.innerHTML=renderText(d.response||d.error||"No response.");messageTools(assistant,text);if(d.requires_confirmation)assistant.querySelector(".bubble").insertAdjacentHTML("beforeend",'<div class="event">⚠ Approval required before this action can execute.</div>');if(d.action_authorized)assistant.querySelector(".bubble").insertAdjacentHTML("beforeend",'<div class="event">✓ Action authorized</div>');if(d.verified)assistant.querySelector(".bubble").insertAdjacentHTML("beforeend",'<div class="event">✓ Verified result</div>')}}}}await loadSessions();$("#chatTitle").textContent=state.session?"Conversation":"AETHON"}catch(e){if(e.name==="AbortError"){content.innerHTML="<p>Generation stopped.</p>";messageTools(assistant,text)}else{content.innerHTML="<p>Something went wrong: "+esc(e.message)+"</p>";messageTools(assistant,text)}}finally{state.controller=null;setBusy(false);$("#input").focus()}}
-async function capabilities(){const d=await api("/v1/capabilities");$("#capList").innerHTML=(d.capabilities||[]).map(c=>'<div class="cap"><div><div class="cap-name">'+esc(c.name)+'</div><div class="cap-desc">'+esc(c.description)+'</div></div><span class="pill '+(c.available?"ok":"")+'">'+(c.available?"AVAILABLE":"NOT CONNECTED")+"</span></div>").join("");$("#capDialog").showModal()}
-$("#newChat").onclick=newChat;$("#clearBtn").onclick=newChat;$("#send").onclick=()=>state.busy?state.controller?.abort():send();$("#capabilitiesBtn").onclick=capabilities;let searchTimer;$("#sessionSearch").addEventListener("input",e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>loadSessions(e.target.value.trim()),180)});$("#renameBtn").onclick=async()=>{if(!state.session)return;const current=state.sessions.find(s=>s.session_id===state.session);const title=prompt("Conversation name",current?.title||"Conversation");if(title&&title.trim()){try{await api("/v1/assistant/sessions/"+encodeURIComponent(state.session),{method:"PATCH",body:JSON.stringify({title:title.trim()})});await loadSessions();$("#chatTitle").textContent=title.trim()}catch(e){alert(e.message)}}};$("#docsBtn").onclick=()=>window.open("/docs","_blank","noopener");$("#settingsBtn").onclick=()=>{ $("#token").value=state.token;$("#settingsDialog").showModal()};$("#saveSettings").onclick=()=>{state.token=$("#token").value.trim();state.token?localStorage.setItem("aethon_token",state.token):localStorage.removeItem("aethon_token");$("#settingsDialog").close();loadSessions()};$("#menuBtn").onclick=()=>$("#sidebar").classList.toggle("open");
-const exportBtn=document.createElement("button");exportBtn.className="side-action";exportBtn.textContent="⇩ Export conversation";exportBtn.onclick=exportConversation;$(".sidebar-bottom").insertBefore(exportBtn,$("#docsBtn"));
-document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>b.closest("dialog").close());
-document.querySelectorAll(".quick-grid button").forEach(b=>b.onclick=()=>send(b.dataset.prompt));
-$("#input").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
-$("#input").addEventListener("input",e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,180)+"px"});
-$("#sessions").addEventListener("click",e=>{const del=e.target.closest("[data-delete]");if(del){e.stopPropagation();api("/v1/assistant/sessions/"+encodeURIComponent(del.dataset.delete),{method:"DELETE"}).then(loadSessions);return}const s=e.target.closest(".session");if(s)openSession(s.dataset.id)});
-loadSessions();
+  const $ = (selector) => document.querySelector(selector);
+  const state = {
+    session: null,
+    busy: false,
+    sessions: [],
+    token: localStorage.getItem("aethon_token") || "",
+    controller: null,
+    lastPrompt: ""
+  };
+
+  const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  }[ch]));
+
+  function authHeaders() {
+    return state.token ? { Authorization: "Bearer " + state.token } : {};
+  }
+
+  async function api(path, options = {}) {
+    const opts = { ...options, headers: { ...(options.headers || {}), ...authHeaders() } };
+    if (opts.body && !opts.headers["Content-Type"]) opts.headers["Content-Type"] = "application/json";
+    const response = await fetch(path, opts);
+    if (!response.ok) {
+      let message = response.statusText;
+      try {
+        const body = await response.text();
+        if (body) message = body.slice(0, 600);
+      } catch {}
+      throw new Error(message || ("HTTP " + response.status));
+    }
+    const type = response.headers.get("content-type") || "";
+    return type.includes("application/json") ? response.json() : response.text();
+  }
+
+  function renderText(value) {
+    let text = esc(value);
+    text = text.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, (_, code) => "<pre><code>" + code + "</code></pre>");
+    text = text.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+    text = text.replace(/\`([^\`]+)\`/g, "<code>$1</code>");
+    text = text.replace(/^[-*] (.*)$/gm, "• $1");
+    return text.split("\\n\\n").map((part) => "<p>" + part.replace(/\\n/g, "<br>") + "</p>").join("");
+  }
+
+  function showWelcome(show) {
+    $("#welcome").style.display = show ? "block" : "none";
+    $("#messages").style.display = show ? "none" : "block";
+  }
+
+  function setBusy(value) {
+    state.busy = value;
+    $("#send").disabled = false;
+    $("#send").textContent = value ? "■" : "↑";
+    $("#send").title = value ? "Stop generation" : "Send";
+    $("#typing").classList.toggle("on", value);
+  }
+
+  function addMessage(role, text, events = []) {
+    const box = $("#messages");
+    const el = document.createElement("article");
+    el.className = "message " + role;
+    const eventHtml = events.map((event) => '<div class="event">• ' + esc(event) + "</div>").join("");
+    el.innerHTML =
+      '<div class="avatar">' + (role === "user" ? "YOU" : "A") + '</div>' +
+      '<div class="bubble"><div class="message-name">' + (role === "user" ? "You" : "AETHON") +
+      '</div><div class="content">' + renderText(text) + "</div>" + eventHtml + "</div>";
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    return el;
+  }
+
+  function addMessageTools(el, prompt) {
+    if (!el || el.dataset.tools) return;
+    el.dataset.tools = "1";
+    const tools = document.createElement("div");
+    tools.className = "message-tools";
+
+    const copy = document.createElement("button");
+    copy.className = "message-tool";
+    copy.textContent = "Copy";
+    copy.onclick = () => navigator.clipboard?.writeText(el.querySelector(".content")?.innerText || "");
+    tools.appendChild(copy);
+
+    if (prompt) {
+      const edit = document.createElement("button");
+      edit.className = "message-tool";
+      edit.textContent = "Edit";
+      edit.onclick = () => {
+        $("#input").value = prompt;
+        $("#input").focus();
+        $("#input").dispatchEvent(new Event("input"));
+      };
+      tools.appendChild(edit);
+
+      const regenerate = document.createElement("button");
+      regenerate.className = "message-tool";
+      regenerate.textContent = "Regenerate";
+      regenerate.onclick = () => send(prompt, true);
+      tools.appendChild(regenerate);
+    }
+
+    el.querySelector(".bubble").appendChild(tools);
+  }
+
+  async function loadSessions(query = "") {
+    try {
+      const endpoint = query
+        ? "/v1/assistant/sessions/search?q=" + encodeURIComponent(query) + "&limit=50"
+        : "/v1/assistant/sessions?limit=50";
+      const data = await api(endpoint);
+      state.sessions = data.sessions || data || [];
+      $("#sessions").innerHTML = state.sessions.map((session) =>
+        '<div class="session ' + (session.session_id === state.session ? "active" : "") +
+        '" data-id="' + esc(session.session_id) + '">' +
+        '<span>◌</span><span class="session-title">' + esc(session.title || "New conversation") +
+        '</span><button class="session-delete" data-delete="' + esc(session.session_id) + '">×</button></div>'
+      ).join("");
+    } catch (error) {
+      $("#sessions").innerHTML = "";
+      console.warn("Session loading failed:", error);
+    }
+  }
+
+  async function openSession(id) {
+    state.session = id;
+    showWelcome(false);
+    $("#messages").innerHTML = "";
+    try {
+      const data = await api("/v1/assistant/sessions/" + encodeURIComponent(id) + "/messages");
+      const messages = data.messages || data || [];
+      messages.forEach((message) => addMessage(message.role === "user" ? "user" : "assistant", message.content));
+      const session = state.sessions.find((item) => item.session_id === id);
+      $("#chatTitle").textContent = session?.title || "Conversation";
+    } catch (error) {
+      addMessage("assistant", "I could not load this conversation: " + error.message);
+    }
+    await loadSessions();
+  }
+
+  function newChat() {
+    state.session = null;
+    $("#chatTitle").textContent = "AETHON";
+    $("#messages").innerHTML = "";
+    showWelcome(true);
+    loadSessions();
+    $("#input").focus();
+  }
+
+  function updateAssistant(el, response) {
+    const content = el.querySelector(".content");
+    if (content) content.innerHTML = renderText(response || "");
+  }
+
+  async function send(text, regenerate = false) {
+    text = (text || $("#input").value).trim();
+    if (!text || state.busy) return;
+
+    state.lastPrompt = text;
+    $("#input").value = "";
+    $("#input").style.height = "auto";
+    showWelcome(false);
+    if (!regenerate) addMessage("user", text);
+
+    setBusy(true);
+    const assistant = addMessage("assistant", "");
+    const content = assistant.querySelector(".content");
+    const events = [];
+
+    try {
+      state.controller = new AbortController();
+      const response = await fetch("/v1/assistant/runtime/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          text,
+          session_id: state.session,
+          execute_tools: true,
+          require_approval: false
+        }),
+        signal: state.controller.signal
+      });
+
+      if (!response.ok) {
+        let message = response.statusText;
+        try {
+          const body = await response.text();
+          if (body) message = body.slice(0, 600);
+        } catch {}
+        throw new Error(message || ("HTTP " + response.status));
+      }
+
+      if (!response.body) throw new Error("Streaming response is unavailable.");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const records = buffer.split("\\n\\n");
+        buffer = records.pop() || "";
+
+        for (const record of records) {
+          const dataLine = record.split("\\n").find((line) => line.startsWith("data: "));
+          if (!dataLine) continue;
+
+          let data;
+          try { data = JSON.parse(dataLine.slice(6)); } catch { continue; }
+
+          if (record.includes("event: progress")) {
+            const message = data.data?.message || data.data?.status || data.type;
+            if (message && !events.includes(message)) {
+              events.push(message);
+              assistant.querySelector(".bubble").insertAdjacentHTML(
+                "beforeend", '<div class="event">• ' + esc(message) + "</div>"
+              );
+            }
+          }
+
+          if (record.includes("event: completed")) {
+            if (data.session_id) state.session = data.session_id;
+            updateAssistant(assistant, data.response || data.error || "No response.");
+            addMessageTools(assistant, text);
+            if (data.requires_confirmation) assistant.querySelector(".bubble").insertAdjacentHTML(
+              "beforeend", '<div class="event">⚠ Approval required before this action can execute.</div>'
+            );
+            if (data.action_authorized) assistant.querySelector(".bubble").insertAdjacentHTML(
+              "beforeend", '<div class="event">✓ Action authorized</div>'
+            );
+            if (data.verified) assistant.querySelector(".bubble").insertAdjacentHTML(
+              "beforeend", '<div class="event">✓ Verified result</div>'
+            );
+          }
+        }
+      }
+
+      await loadSessions();
+      if (state.session) {
+        const current = state.sessions.find((item) => item.session_id === state.session);
+        $("#chatTitle").textContent = current?.title || "Conversation";
+      }
+    } catch (error) {
+      if (error.name === "AbortError") {
+        updateAssistant(assistant, "Generation stopped.");
+      } else {
+        updateAssistant(assistant, "Something went wrong: " + error.message);
+      }
+      addMessageTools(assistant, text);
+    } finally {
+      state.controller = null;
+      setBusy(false);
+      $("#input").focus();
+    }
+  }
+
+  async function showCapabilities() {
+    try {
+      const data = await api("/v1/capabilities");
+      $("#capList").innerHTML = (data.capabilities || []).map((capability) =>
+        '<div class="cap"><div><div class="cap-name">' + esc(capability.name) +
+        '</div><div class="cap-desc">' + esc(capability.description) +
+        '</div></div><span class="pill ' + (capability.available ? "ok" : "") + '">' +
+        (capability.available ? "AVAILABLE" : "NOT CONNECTED") + "</span></div>"
+      ).join("");
+      $("#capDialog").showModal();
+    } catch (error) {
+      alert("Could not load capabilities: " + error.message);
+    }
+  }
+
+  function exportConversation() {
+    const rows = Array.from(document.querySelectorAll("#messages .message")).map((message) => ({
+      role: message.classList.contains("user") ? "You" : "AETHON",
+      text: message.querySelector(".content")?.innerText || ""
+    }));
+    if (!rows.length) {
+      alert("There is no conversation to export yet.");
+      return;
+    }
+    const body = rows.map((row) => "## " + row.role + "\\n\\n" + row.text).join("\\n\\n");
+    const blob = new Blob([body], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = (state.sessions.find((item) => item.session_id === state.session)?.title || "aethon-conversation") + ".md";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function bind() {
+    $("#newChat").onclick = newChat;
+    $("#clearBtn").onclick = newChat;
+    $("#send").onclick = () => state.busy ? state.controller?.abort() : send();
+    $("#capabilitiesBtn").onclick = showCapabilities;
+
+    $("#settingsBtn").onclick = () => {
+      $("#token").value = state.token;
+      $("#settingsDialog").showModal();
+    };
+
+    $("#saveSettings").onclick = () => {
+      state.token = $("#token").value.trim();
+      if (state.token) localStorage.setItem("aethon_token", state.token);
+      else localStorage.removeItem("aethon_token");
+      $("#settingsDialog").close();
+      loadSessions();
+    };
+
+    $("#docsBtn").onclick = () => window.open("/docs", "_blank", "noopener");
+    $("#menuBtn").onclick = () => $("#sidebar").classList.toggle("open");
+    $("#renameBtn").onclick = async () => {
+      if (!state.session) return;
+      const current = state.sessions.find((item) => item.session_id === state.session);
+      const title = window.prompt("Conversation name", current?.title || "Conversation");
+      if (!title?.trim()) return;
+      try {
+        await api("/v1/assistant/sessions/" + encodeURIComponent(state.session), {
+          method: "PATCH",
+          body: JSON.stringify({ title: title.trim() })
+        });
+        $("#chatTitle").textContent = title.trim();
+        await loadSessions();
+      } catch (error) {
+        alert(error.message);
+      }
+    };
+
+    document.querySelectorAll("[data-close]").forEach((button) => {
+      button.onclick = () => button.closest("dialog").close();
+    });
+
+    document.querySelectorAll(".quick-grid button").forEach((button) => {
+      button.onclick = () => send(button.dataset.prompt);
+    });
+
+    $("#input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        send();
+      }
+    });
+
+    $("#input").addEventListener("input", (event) => {
+      event.target.style.height = "auto";
+      event.target.style.height = Math.min(event.target.scrollHeight, 180) + "px";
+    });
+
+    let searchTimer;
+    $("#sessionSearch").addEventListener("input", (event) => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => loadSessions(event.target.value.trim()), 180);
+    });
+
+    $("#sessions").addEventListener("click", (event) => {
+      const deleteButton = event.target.closest("[data-delete]");
+      if (deleteButton) {
+        event.stopPropagation();
+        api("/v1/assistant/sessions/" + encodeURIComponent(deleteButton.dataset.delete), { method: "DELETE" })
+          .then(loadSessions)
+          .catch((error) => alert(error.message));
+        return;
+      }
+      const session = event.target.closest(".session");
+      if (session) openSession(session.dataset.id);
+    });
+
+    const exportButton = document.createElement("button");
+    exportButton.className = "side-action";
+    exportButton.textContent = "⇩ Export conversation";
+    exportButton.onclick = exportConversation;
+    $(".sidebar-bottom").insertBefore(exportButton, $("#docsBtn"));
+
+    loadSessions();
+  }
+
+  window.addEventListener("error", (event) => {
+    console.error("AETHON frontend error:", event.error || event.message);
+  });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bind, { once: true });
+  } else {
+    bind();
+  }
+})();
