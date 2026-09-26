@@ -3,6 +3,7 @@ import operator as op
 from aethon.schemas import ToolResult, ToolSpec, RiskClass
 from aethon.web import WebFetcher
 from aethon.web_search import WebSearch
+from app.chart_tools import ChartTool
 
 
 class CalculatorTool:
@@ -109,12 +110,23 @@ class WebFetchTool:
             return ToolResult(ok=False, error=f'web fetch failed: {exc}')
 
 
+class ChartToolAdapter:
+    spec = ToolSpec(**ChartTool().spec)
+
+    def execute(self, text: str) -> ToolResult:
+        try:
+            return ToolResult(ok=True, output=ChartTool().execute(text))
+        except Exception as exc:
+            return ToolResult(ok=False, error=str(exc))
+
+
 class ToolRegistry:
     def __init__(self, web_search=None, web_fetch=None):
         self._tools = {
             'calculator': CalculatorTool(),
             'web_search': WebSearchTool(web_search),
             'web_fetch': WebFetchTool(web_fetch),
+            'chart': ChartToolAdapter(),
         }
 
     def list(self):
