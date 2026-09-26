@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from aethon.assistant_orchestrator import AssistantMode
-from aethon.model_router import DeterministicProvider, ModelRouter
+from aethon.model_router import DeterministicProvider, LocalIntelligenceProvider, ModelRouter
 from aethon.schemas import RiskClass, ToolSpec
 from app.assistant_repository import AssistantRepository
 from app.assistant_runtime import AssistantRuntime
+from app.tools import ToolRegistry
 
 
 def fresh_repo() -> AssistantRepository:
@@ -101,7 +104,7 @@ def test_model_failure_is_truthful_and_persisted():
     class FailingProvider:
         name = "test-failing"
 
-        def generate(self, prompt: str) -> str:
+        def generate(self, prompt: str, user_text: str | None = None) -> str:
             raise RuntimeError("offline")
 
         def health(self) -> bool:
@@ -123,3 +126,43 @@ def test_new_conversation_gets_safe_local_title():
     session = rt.repository.session("title-1", "owner-title")
     assert session is not None
     assert session["title"] == "Build a weather dashboard for farmers"
+
+
+def test_local_intelligence_provider_handles_hello_aethon():
+    provider = LocalIntelligenceProvider()
+    assert provider.generate("", user_text="hello aethon") == "Hello! I'm AETHON. How can I help you today?"
+
+
+def test_unsupported_local_question_automatically_uses_web_research():
+    class SearchProvider:
+        def search(self, query, limit):
+            return [
+                SimpleNamespace(
+                    title="Example source",
+                    url="https://example.com/fact",
+                    snippet="A source-backed fact about the question.",
+                    source="example.com",
+                )
+            ]
+
+    class FetchProvider:
+        def fetch(self, url):
+            return {"text": "A source-backed fact about the question with additional context."}
+
+    rt = AssistantRuntime(
+        repository=fresh_repo(),
+        model_router=ModelRouter(LocalIntelligenceProvider()),
+        tools=ToolRegistry(SearchProvider(), FetchProvider()),
+    )
+    result = rt.run(
+        owner_id="owner-web-fallback",
+        session_id="web-fallback",
+        text="Explain the history of the Internet",
+        language="en-IN",
+    )
+
+    assert result.verified is True
+    assert "Example source" in result.response
+    assert "source-backed fact" in result.response
+    assert any(event.type == "research.fallback" for event in result.events)
+    assert any(event.type == "tool.completed" and event.data["tool"] == "web_research" for event in result.events)
