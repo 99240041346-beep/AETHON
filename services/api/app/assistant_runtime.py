@@ -74,6 +74,8 @@ class AssistantRuntime:
     def _tool_intent(intent: AssistantIntent) -> tuple[str, dict[str, Any]] | None:
         text = intent.text.strip()
         lowered = text.casefold()
+        if lowered.startswith(("analyze data", "analyze this data", "analyze dataset")):
+            return "data_analyze", {"data": "", "format": "csv"}
         if lowered.startswith(("calculate ", "calc ")):
             return "calculator", {"expression": text.split(" ", 1)[1].strip()}
         if any(marker in lowered for marker in ("bar chart", "line chart", "pie chart", "histogram", "scatter plot", "scatter chart")):
@@ -283,6 +285,13 @@ class AssistantRuntime:
         tool = self._tool_intent(intent)
         if tool is not None and execute_tools:
             tool_name, arguments = tool
+            if tool_name == "data_analyze" and attachment_text:
+                lower_context = attachment_text.casefold()
+                data_format = "json" if ".json" in lower_context else "csv"
+                raw = attachment_text
+                if "\n" in raw:
+                    raw = raw.split("\n", 1)[1]
+                arguments = {"data": raw[:200000], "format": data_format}
             result = self._tool(ToolRequest(tool=tool_name, arguments=arguments, request_id=UUID(request_id)),
                                 intent, session_id, request_id, events, require_approval, event_callback)
             status = "AWAITING_APPROVAL" if result.requires_confirmation else (
