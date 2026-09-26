@@ -39,7 +39,7 @@ class CapabilityRegistry:
 
     def __init__(self, tool_names: set[str] | None = None) -> None:
         tools = tool_names or set()
-        model_provider = os.getenv('AETHON_MODEL_PROVIDER', 'deterministic').lower()
+        model_provider = os.getenv('AETHON_MODEL_PROVIDER', 'auto').lower()
         database = os.getenv('AETHON_DATABASE_URL', '')
         local_agent = os.getenv('AETHON_LOCAL_AGENT_URL', '')
         github = os.getenv('GITHUB_TOKEN', '')
@@ -49,7 +49,7 @@ class CapabilityRegistry:
             Capability('WEB_FETCH', 'Secure public HTTP(S) page fetch', 'tool', available='web_fetch' in tools, integration='web_fetch'),
             Capability('CALCULATOR', 'Safe arithmetic calculation', 'tool', available='calculator' in tools, integration='calculator'),
             Capability('CHART', 'Bar, line, pie, histogram and scatter visualizations', 'tool', available='chart' in tools, integration='chart'),
-            Capability('MODEL_PROVIDER', 'Configurable model provider', 'assistant', available=model_provider != 'deterministic', integration=model_provider),
+            Capability('MODEL_PROVIDER', 'Configurable model provider', 'assistant', available=(model_provider == 'openai' and bool(os.getenv('AETHON_MODEL_API_KEY'))) or (model_provider == 'openai-compatible' and bool(os.getenv('AETHON_MODEL_API_KEY'))), integration=model_provider),
             Capability('DATABASE', 'Durable PostgreSQL persistence', 'platform', available=database.startswith(('postgres://', 'postgresql://')), integration='postgresql'),
             Capability('GITHUB', 'Authorized GitHub repository workflows', 'agent', available=bool(github), integration='github'),
             Capability('LOCAL_COMPUTER', 'Authenticated local computer agent', 'operating', available=bool(local_agent), integration='local-agent'),
