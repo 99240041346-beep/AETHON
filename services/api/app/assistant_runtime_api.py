@@ -17,6 +17,8 @@ runtime = AssistantRuntime()
 
 
 class RuntimeAssistantRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     text: str = Field(min_length=1, max_length=8000)
     language: str = Field(default="te-IN", min_length=2, max_length=20)
     session_id: str | None = Field(default=None, max_length=100)
