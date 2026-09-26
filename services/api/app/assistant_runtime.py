@@ -119,6 +119,16 @@ class AssistantRuntime:
         session_id = session_id or str(uuid4())
         self.repository.ensure_session(session_id, owner_id, language, project_id)
         history = self.repository.history(session_id, owner_id, limit=12)
+        if not history:
+            # Give newly created conversations a useful title without exposing
+            # hidden reasoning or making another model call.
+            title = " ".join(text.strip().split())
+            if len(title) > 56:
+                title = title[:53].rstrip() + "..."
+            try:
+                self.repository.rename_session(session_id, owner_id, title)
+            except (ValueError, PermissionError):
+                pass
         self.repository.add_message(session_id, owner_id, "user", text, language)
         self._emit(events, "context.loaded", request_id, event_callback, messages=len(history))
         intent = self.orchestrator.classify(text)
