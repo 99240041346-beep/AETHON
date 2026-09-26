@@ -46,6 +46,7 @@ def _result_payload(result, language: str) -> dict:
         "action_authorized": result.action_authorized,
         "verified": result.verified,
         "error": result.error,
+        "visualization": result.visualization,
         "events": [
             {"type": event.type, "request_id": event.request_id, "data": event.data}
             for event in result.events
