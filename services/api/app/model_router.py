@@ -52,6 +52,55 @@ class DeterministicProvider:
     def health(self) -> bool:
         return True
 
+class LocalIntelligenceProvider:
+    """Bounded, offline knowledge layer for common questions when no remote model is configured."""
+
+    name = "local-intelligence"
+
+    _knowledge = {
+        "btech": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India. Common specializations include Computer Science, Information Technology, Electronics, Mechanical, Civil, and Electrical Engineering.",
+        "what is btech": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India. Students study a chosen engineering specialization along with mathematics, engineering fundamentals, projects, and practical work.",
+        "artificial intelligence": "Artificial intelligence (AI) is the field of building computer systems that can perform tasks that normally require human intelligence, such as understanding language, recognizing patterns, reasoning, making predictions, and generating content.",
+        "what is ai": "Artificial intelligence (AI) is the field of building computer systems that can perform tasks such as understanding language, recognizing patterns, reasoning, making predictions, and generating content.",
+        "machine learning": "Machine learning is a branch of AI in which systems learn patterns from data and use those patterns to make predictions or decisions. Common approaches include supervised, unsupervised, and reinforcement learning.",
+        "what is machine learning": "Machine learning is a branch of AI in which systems learn patterns from data and use those patterns to make predictions or decisions instead of relying only on hand-written rules.",
+        "python": "Python is a high-level, general-purpose programming language known for readable syntax and a large ecosystem. It is widely used for web development, automation, data analysis, machine learning, scripting, and education.",
+        "what is python": "Python is a high-level, general-purpose programming language known for readable syntax and a large ecosystem. It is widely used for web development, automation, data analysis, machine learning, and scripting.",
+        "api": "An API, or Application Programming Interface, is a defined way for software components to communicate. A web API commonly uses HTTP requests and structured responses such as JSON.",
+        "what is api": "An API, or Application Programming Interface, is a defined way for software components to communicate. A web API commonly uses HTTP requests and structured responses such as JSON.",
+        "database": "A database is a system for storing and retrieving information. Relational databases such as PostgreSQL organize information into tables and support queries, constraints, transactions, and relationships.",
+        "what is database": "A database is a system for storing and retrieving information. Relational databases such as PostgreSQL organize information into tables and support queries, constraints, transactions, and relationships.",
+        "http": "HTTP is the protocol commonly used for communication between web clients and servers. Requests use methods such as GET, POST, PUT, PATCH, and DELETE, while responses include a status code and data.",
+        "git": "Git is a distributed version-control system. It records changes to files as commits and supports branches, merging, collaboration, and restoring earlier versions.",
+        "android": "Android is a mobile operating system and application platform. Android apps are commonly built with Kotlin or Java using Android Studio and the Android SDK."
+    }
+
+    @classmethod
+    def _answer(cls, user_text: str) -> str | None:
+        normalized = " ".join(user_text.lower().strip().rstrip("?.!").split())
+        for key, answer in cls._knowledge.items():
+            if normalized == key or normalized == "define " + key:
+                return answer
+        return None
+
+    def generate(self, prompt: str, user_text: str | None = None) -> str:
+        text = (user_text or "").strip()
+        if not text:
+            return "How can I help you?"
+        normalized = text.lower().strip().rstrip("?.!").strip()
+        if normalized in {"hello", "hi", "hey", "hello aethon", "hi aethon", "hey aethon"}:
+            return "Hello! I'm AETHON. How can I help you today?"
+        if normalized in {"who are you", "what are you", "what is aethon"}:
+            return "I'm AETHON, a personal AI operating platform. I can work with conversations, calculations, research, files, charts, voice, Android capabilities, and connected tools that are enabled for this deployment."
+        answer = self._answer(text)
+        if answer:
+            return answer
+        return "I don't have a remote language model configured on this deployment, so I can't reliably generate an unrestricted answer to that question yet. I can still handle supported local intelligence, calculations, charts, research, files, and connected tools."
+
+    def health(self) -> bool:
+        return True
+
+
 class OpenAIResponsesProvider:
     """OpenAI Responses API provider with bounded retries and optional web search."""
     name = "openai"
@@ -104,16 +153,16 @@ class OpenAIResponsesProvider:
 class OpenAICompatibleProvider:
     name="openai-compatible"
     def __init__(self,base_url:str,model:str,api_key:str,timeout:float=30.0,retries:int=2): self.base_url=base_url.rstrip("/");self.model=model;self.api_key=api_key;self.timeout=timeout;self.retries=max(0,retries)
-    def _request(self,prompt:str)->httpx.Response:
+    def _request(self,prompt:str, user_text:str|None=None)->httpx.Response:
         last_error:Exception|None=None
         for attempt in range(self.retries+1):
-            try:return httpx.post(f"{self.base_url}/chat/completions",headers={"Authorization":f"Bearer {self.api_key}","Content-Type":"application/json"},json={"model":self.model,"messages":[{"role":"system","content":"You are AETHON, a bounded personal AI assistant. Never claim an action or tool result unless verified."},{"role":"user","content":prompt}],},timeout=self.timeout)
+            try:return httpx.post(f"{self.base_url}/chat/completions",headers={"Authorization":f"Bearer {self.api_key}","Content-Type":"application/json"},json={"model":self.model,"messages":[{"role":"system","content":"You are AETHON, a bounded personal AI assistant. Never claim an action or tool result unless verified."},{"role":"user","content":user_text or prompt}],},timeout=self.timeout)
             except (httpx.TimeoutException,httpx.NetworkError) as exc:
                 last_error=exc
                 if attempt<self.retries: time.sleep(min(.25*(2**attempt),1.0))
         raise RuntimeError("model provider request failed after bounded retries") from last_error
     def generate(self,prompt:str, user_text: str | None = None)->str:
-        response=self._request(prompt)
+        response=self._request(prompt, user_text=user_text)
         if response.status_code>=400: raise RuntimeError(f"model provider returned HTTP {response.status_code}")
         data=response.json()
         try:return data["choices"][0]["message"]["content"]
@@ -131,7 +180,7 @@ class ModelRouter:
         if provider=="auto":
             api_key=os.getenv("AETHON_MODEL_API_KEY","").strip()
             provider = "openai" if api_key else "deterministic"
-        if provider=="deterministic": return DeterministicProvider()
+        if provider=="deterministic": return LocalIntelligenceProvider()
         if provider=="openai":
             base_url=os.getenv("AETHON_MODEL_BASE_URL","https://api.openai.com/v1");model=os.getenv("AETHON_MODEL_NAME","gpt-5.6-luna");api_key=os.getenv("AETHON_MODEL_API_KEY","")
             if not api_key: raise RuntimeError("AETHON_MODEL_API_KEY is required when AETHON_MODEL_PROVIDER=openai")
