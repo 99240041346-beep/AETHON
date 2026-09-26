@@ -176,26 +176,11 @@ def test_compare_requests_route_to_research():
     assert any(event.type == "tool.selected" and event.data["tool"] == "web_research" for event in result.events)
 
 
-def test_unsupported_local_question_automatically_uses_web_research():
-    class SearchProvider:
-        def search(self, query, limit):
-            return [
-                SimpleNamespace(
-                    title="Example source",
-                    url="https://example.com/fact",
-                    snippet="A source-backed fact about the question.",
-                    source="example.com",
-                )
-            ]
-
-    class FetchProvider:
-        def fetch(self, url):
-            return {"text": "A source-backed fact about the question with additional context."}
-
+def test_generic_local_question_does_not_automatically_trigger_web_research():
     rt = AssistantRuntime(
         repository=fresh_repo(),
         model_router=ModelRouter(LocalIntelligenceProvider()),
-        tools=ToolRegistry(SearchProvider(), FetchProvider()),
+        tools=ToolRegistry(),
     )
     result = rt.run(
         owner_id="owner-web-fallback",
@@ -204,11 +189,39 @@ def test_unsupported_local_question_automatically_uses_web_research():
         language="en-IN",
     )
 
+    assert result.verified is False
+    assert not any(event.type == "research.fallback" for event in result.events)
+    assert not any(event.type == "tool.selected" and event.data.get("tool") == "web_research" for event in result.events)
+
+
+def test_fresh_local_question_can_use_web_research_fallback():
+    class SearchProvider:
+        def search(self, query, limit):
+            return [SimpleNamespace(
+                title="Example source",
+                url="https://example.com/fact",
+                snippet="A source-backed fact about the latest topic.",
+                source="example.com",
+            )]
+
+    class FetchProvider:
+        def fetch(self, url):
+            return {"text": "Current source-backed information."}
+
+    rt = AssistantRuntime(
+        repository=fresh_repo(),
+        model_router=ModelRouter(LocalIntelligenceProvider()),
+        tools=ToolRegistry(SearchProvider(), FetchProvider()),
+    )
+    result = rt.run(
+        owner_id="owner-web-fresh",
+        session_id="web-fresh",
+        text="latest information about quantum computing",
+        language="en-IN",
+    )
+
     assert result.verified is True
-    assert "Example source" in result.response
-    assert "source-backed fact" in result.response
     assert any(event.type == "research.fallback" for event in result.events)
-    assert any(event.type == "tool.completed" and event.data["tool"] == "web_research" for event in result.events)
 
 
 def test_research_prefers_authoritative_and_diverse_sources():
