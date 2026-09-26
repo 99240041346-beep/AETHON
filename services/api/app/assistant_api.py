@@ -40,6 +40,8 @@ def _transport() -> AndroidCommandTransport:
 
 
 class AssistantRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     text: str = Field(min_length=1, max_length=8000)
     language: str = Field(default="te-IN", min_length=2, max_length=20)
     session_id: str | None = Field(default=None, max_length=100)
@@ -47,6 +49,8 @@ class AssistantRequest(BaseModel):
 
 
 class DeviceActionRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     text: str = Field(min_length=1, max_length=2000)
     device_id: str = Field(min_length=1, max_length=128)
     approval: bool = False
@@ -54,6 +58,8 @@ class DeviceActionRequest(BaseModel):
 
 
 class DeviceWorkflowRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     text: str = Field(min_length=1, max_length=2000)
     device_id: str = Field(min_length=1, max_length=128)
     approval: bool = False
@@ -61,6 +67,8 @@ class DeviceWorkflowRequest(BaseModel):
 
 
 class SessionRenameRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     title: str = Field(min_length=1, max_length=200)
 
 
