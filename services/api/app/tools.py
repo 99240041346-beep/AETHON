@@ -118,7 +118,10 @@ class WebResearchTool:
         description='Research a public-web question by searching sources, fetching pages, and assembling evidence.',
         input_schema={
             'type': 'object',
-            'properties': {'query': {'type': 'string', 'minLength': 3, 'maxLength': 2000}},
+            'properties': {
+                'query': {'type': 'string', 'minLength': 3, 'maxLength': 2000},
+                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10},
+            },
             'required': ['query'],
             'additionalProperties': False,
         },
@@ -139,9 +142,16 @@ class WebResearchTool:
             lambda url: fetcher.fetch(url),
         )
 
-    def execute(self, query: str) -> ToolResult:
+    def execute(self, query: str, limit: int = 5) -> ToolResult:
         try:
-            report = self.agent.research(query)
+            bounded_limit = max(1, min(int(limit), 10))
+            agent = WebResearchAgent(
+                self.agent.search,
+                self.agent.fetch,
+                max_sources=bounded_limit,
+                max_content_chars=12000,
+            )
+            report = agent.research(query)
             return ToolResult(ok=True, output={
                 'query': report.query,
                 'sources': [
