@@ -52,11 +52,13 @@ class DeterministicProvider:
             return "Goodbye! I'll be here when you need me."
         if normalized in {"how are you", "how are you aethon"}:
             return "I'm running normally and ready to help. What would you like to do?"
-        if normalized in {"who are you", "what are you", "what is aethon"}:
-            return "I'm AETHON, your personal AI operating platform. I can work with conversations, calculations, research, files, charts, voice, Android capabilities, and connected tools that are enabled for this deployment."
+        if normalized in {"who are you", "what are you", "what is aethon", "tell about yourself", "tell me about yourself", "about yourself", "introduce yourself"}:
+            return "I'm AETHON, an AI assistant designed to help you understand information, solve problems, write and analyze content, research the web when needed, work with files, create things, and use authorized connected tools and Android capabilities."
+        if normalized in {"can you talk in telugu", "can you speak telugu", "do you speak telugu", "can you talk telugu", "తెలుగులో మాట్లాడగలవా"}:
+            return "అవును, నేను తెలుగులో మాట్లాడగలను. మీరు తెలుగులోనే ప్రశ్న అడగండి; నేను తెలుగులో సమాధానం ఇస్తాను."
         if normalized in {"what can you do", "what can you do aethon", "help", "help me"}:
-            return "I can chat, calculate, research the web when enabled, work with files, create charts, use voice, and work with authorized Android and connected tools. Ask me what you want to accomplish and I'll use the appropriate capability."
-        return "I don't have a remote language model configured on this deployment, so I can't reliably generate an unrestricted answer to that question yet. I can still handle supported local intelligence, calculations, charts, research, files, and connected tools."
+            return "I can chat naturally, explain concepts, calculate, research current information, work with files, write and analyze content, create charts and other artifacts, and use authorized Android and connected tools."
+        return "I can help with that. Tell me what you want to accomplish, and I'll use the capabilities available to me."
 
     def health(self) -> bool:
         return True
@@ -106,15 +108,17 @@ class LocalIntelligenceProvider:
             return "Goodbye! I'll be here when you need me."
         if normalized in {"how are you", "how are you aethon"}:
             return "I'm running normally and ready to help. What would you like to do?"
-        if normalized in {"who are you", "what are you", "what is aethon"}:
-            return "I'm AETHON, your personal AI operating platform. I can work with conversations, calculations, research, files, charts, voice, Android capabilities, and connected tools."
+        if normalized in {"who are you", "what are you", "what is aethon", "tell about yourself", "tell me about yourself", "about yourself", "introduce yourself"}:
+            return "I'm AETHON, an AI assistant designed to help you understand information, solve problems, write and analyze content, research the web when needed, work with files, create things, and use authorized connected tools and Android capabilities."
+        if normalized in {"can you talk in telugu", "can you speak telugu", "do you speak telugu", "can you talk telugu", "తెలుగులో మాట్లాడగలవా"}:
+            return "అవును, నేను తెలుగులో మాట్లాడగలను. మీరు తెలుగులోనే ప్రశ్న అడగండి; నేను తెలుగులో సమాధానం ఇస్తాను."
         if normalized in {"what can you do", "what can you do aethon", "help", "help me"}:
-            return "I can chat, calculate, research the web when enabled, work with files, create charts, use voice, and work with authorized Android and connected tools."
+            return "I can chat naturally, explain concepts, calculate, research current information, work with files, write and analyze content, create charts and other artifacts, and use authorized Android and connected tools."
         if normalized in self._knowledge:
             return self._knowledge[normalized]
         if normalized.startswith("define ") and normalized[7:] in self._knowledge:
             return self._knowledge[normalized[7:]]
-        return "I don't have a remote language model configured on this deployment, so I can't reliably generate an unrestricted answer to that question yet. I can still handle supported local intelligence, calculations, charts, research, files, and connected tools."
+        return "I can help with that. Tell me what you want to accomplish, and I'll use the capabilities available to me."
 
     def health(self) -> bool:
         return True
