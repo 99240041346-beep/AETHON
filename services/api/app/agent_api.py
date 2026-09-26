@@ -7,12 +7,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from aethon.agent import AgentRuntime
+from aethon.astra_runtime import ASTRARuntime
 from aethon.auth import current_owner, security
 from aethon.schemas import Task, TaskStatus
 
 
 router = APIRouter(prefix="/v1/agents", tags=["agents"])
 _runtime = AgentRuntime()
+_astra = ASTRARuntime()
 _tasks: dict[str, Task] = {}
 _lock = RLock()
 
@@ -23,10 +25,16 @@ class AgentRunRequest(BaseModel):
     goal: str = Field(min_length=3, max_length=10000)
     project_id: str | None = Field(default=None, max_length=200)
     priority: int = Field(default=5, ge=1, le=10)
+    agent_id: str = Field(default="project", min_length=2, max_length=64)
 
 
 def owner(credentials=Depends(security)) -> str:
     return current_owner(credentials)
+
+
+@router.get("")
+def list_astra_agents(owner_id: str = Depends(owner)) -> dict:
+    return {"ok": True, "agents": [item.__dict__ for item in _astra.agents()]}
 
 
 @router.post("/run")
@@ -41,12 +49,21 @@ def run_agent(request: AgentRunRequest, owner_id: str = Depends(owner)) -> dict:
     )
     with _lock:
         _tasks[str(task.task_id)] = task
-    try:
-        result = _runtime.run(task)
-    except Exception as exc:
-        task.status = TaskStatus.FAILED
-        task.error = str(exc)
-        result = task
+    if request.agent_id != "project":
+        try:
+            result = _astra.run(agent_id=request.agent_id, goal=request.goal, owner_id=owner_id,
+                                project_id=request.project_id, priority=request.priority, task_id=task.task_id)
+        except Exception as exc:
+            task.status = TaskStatus.FAILED
+            task.error = str(exc)
+            result = task
+    else:
+        try:
+            result = _runtime.run(task)
+        except Exception as exc:
+            task.status = TaskStatus.FAILED
+            task.error = str(exc)
+            result = task
     with _lock:
         _tasks[str(result.task_id)] = result
     return {
