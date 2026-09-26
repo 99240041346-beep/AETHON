@@ -56,9 +56,6 @@ class DeterministicProvider:
             return "I'm AETHON, your personal AI operating platform. I can work with conversations, calculations, research, files, charts, voice, Android capabilities, and connected tools that are enabled for this deployment."
         if normalized in {"what can you do", "what can you do aethon", "help", "help me"}:
             return "I can chat, calculate, research the web when enabled, work with files, create charts, use voice, and work with authorized Android and connected tools. Ask me what you want to accomplish and I'll use the appropriate capability."
-        answer = self._answer(text)
-        if answer:
-            return answer
         return "I don't have a remote language model configured on this deployment, so I can't reliably generate an unrestricted answer to that question yet. I can still handle supported local intelligence, calculations, charts, research, files, and connected tools."
 
     def health(self) -> bool:
