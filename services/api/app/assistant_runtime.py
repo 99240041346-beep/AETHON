@@ -269,4 +269,4 @@ class AssistantRuntime:
         self._emit(events, "response.ready", request_id, event_callback, status=status)
         return RuntimeResult(request_id, session_id, intent.mode, intent, response,
                              events=tuple(events), verified=status == "VERIFIED",
-                             error=None if status == "FAILED" else None)
+                             error=None if status != "FAILED" else "model generation failed")
