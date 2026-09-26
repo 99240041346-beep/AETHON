@@ -70,7 +70,9 @@ class LocalIntelligenceProvider:
     _knowledge = {
         "btech": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India.",
         "what is btech": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India.",
-        "what is ai": "Artificial intelligence is the field of building computer systems that can perform tasks such as understanding language, recognizing patterns, reasoning, and generating content.",
+        "what is ai": "AI stands for artificial intelligence. It is the field of building computer systems that can understand language, recognize patterns, reason over information, make predictions or decisions, and generate content.",
+        "ai means": "AI stands for artificial intelligence. It refers to computer systems that can perform tasks that normally require human intelligence, such as understanding language, recognizing patterns, reasoning, and generating content.",
+        "what does ai mean": "AI stands for artificial intelligence. It refers to computer systems that can perform tasks that normally require human intelligence, such as understanding language, recognizing patterns, reasoning, and generating content.",
         "artificial intelligence": "Artificial intelligence is the field of building computer systems that can perform tasks such as understanding language, recognizing patterns, reasoning, and generating content.",
         "machine learning": "Machine learning is a branch of AI in which systems learn patterns from data to make predictions or decisions.",
         "what is machine learning": "Machine learning is a branch of AI in which systems learn patterns from data to make predictions or decisions.",
