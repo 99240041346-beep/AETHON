@@ -8,7 +8,8 @@
     sessions: [],
     token: localStorage.getItem("aethon_token") || "",
     controller: null,
-    lastPrompt: ""
+    lastPrompt: "",
+    attachments: []
   };
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
@@ -139,8 +140,33 @@
     await loadSessions();
   }
 
+  function renderAttachments() {
+    const box = $("#attachmentList");
+    box.innerHTML = state.attachments.map((item, index) => '<span class="attachment-chip">' + esc(item.filename) + ' <button type="button" data-remove-attachment="' + index + '">×</button></span>').join("");
+  }
+
+  async function uploadAttachments(files) {
+    for (const file of Array.from(files).slice(0, 5 - state.attachments.length)) {
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const response = await fetch("/v1/assistant/runtime/attachments", { method: "POST", headers: authHeaders(), body: form });
+        if (!response.ok) throw new Error((await response.text()).slice(0, 300));
+        state.attachments.push(await response.json());
+      } catch (error) {
+        const chip = document.createElement("span");
+        chip.className = "attachment-chip error";
+        chip.textContent = file.name + ": " + error.message;
+        $("#attachmentList").appendChild(chip);
+      }
+    }
+    renderAttachments();
+  }
+
   function newChat() {
     state.session = null;
+    state.attachments = [];
+    renderAttachments();
     $("#chatTitle").textContent = "AETHON";
     $("#messages").innerHTML = "";
     showWelcome(true);
@@ -159,6 +185,8 @@
 
     state.lastPrompt = text;
     $("#input").value = "";
+    state.attachments = [];
+    renderAttachments();
     $("#input").style.height = "auto";
     showWelcome(false);
     if (!regenerate) addMessage("user", text);
@@ -177,7 +205,8 @@
           text,
           session_id: state.session,
           execute_tools: true,
-          require_approval: false
+          require_approval: false,
+          attachment_ids: state.attachments.map((item) => item.attachment_id)
         }),
         signal: state.controller.signal
       });
@@ -295,6 +324,18 @@
     $("#newChat").onclick = newChat;
     $("#clearBtn").onclick = newChat;
     $("#send").onclick = () => state.busy ? state.controller?.abort() : send();
+    $("#attachBtn").onclick = () => $("#attachmentInput").click();
+    $("#attachmentInput").addEventListener("change", (event) => {
+      uploadAttachments(event.target.files);
+      event.target.value = "";
+    });
+    $("#attachmentList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-remove-attachment]");
+      if (!button) return;
+      state.attachments.splice(Number(button.dataset.removeAttachment), 1);
+      renderAttachments();
+    });
+
     $("#capabilitiesBtn").onclick = showCapabilities;
 
     $("#settingsBtn").onclick = () => {
