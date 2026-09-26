@@ -33,3 +33,9 @@ def test_assistant_requires_confirmation_for_generic_side_effect_request():
     assert body["mode"] == "ACTION"
     assert body["requires_confirmation"] is True
     assert body["action_authorized"] is False
+
+
+def test_assistant_request_rejects_unknown_fields():
+    client = TestClient(app)
+    response = client.post("/v1/assistant/respond", json={"text": "hello", "unexpected": True})
+    assert response.status_code == 422
