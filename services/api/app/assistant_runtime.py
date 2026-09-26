@@ -8,6 +8,7 @@ from aethon.assistant_orchestrator import AssistantIntent, AssistantMode, Assist
 from aethon.execution_safety_gate import ExecutionAuthorizationError, SafetyExecutionGate
 from aethon.model_router import ModelRouter
 from aethon.ai_provider_fabric import AIProviderFabric
+from aethon.creation_provider_fabric import CreationProviderFabric
 from aethon.schemas import ToolRequest, ToolResult
 from aethon.security import SafetyKernel
 from app.assistant_repository import AssistantRepository
@@ -47,6 +48,7 @@ class AssistantRuntime:
                  orchestrator: AssistantOrchestrator | None = None,
                  model_router: ModelRouter | None = None,
                  ai_fabric: AIProviderFabric | None = None,
+                 creation_fabric: CreationProviderFabric | None = None,
                  tools: ToolRegistry | None = None,
                  safety_gate: SafetyExecutionGate | None = None,
                  event_sink: Callable[[RuntimeEvent], None] | None = None) -> None:
@@ -54,6 +56,7 @@ class AssistantRuntime:
         self.orchestrator = orchestrator or AssistantOrchestrator()
         self.model_router = model_router or ModelRouter()
         self.ai_fabric = ai_fabric or AIProviderFabric()
+        self.creation_fabric = creation_fabric or CreationProviderFabric()
         self.tools = tools or ToolRegistry()
         self.safety_gate = safety_gate or SafetyExecutionGate(SafetyKernel())
         self.event_sink = event_sink
@@ -311,6 +314,31 @@ class AssistantRuntime:
                        requires_confirmation=intent.requires_confirmation)
             return RuntimeResult(request_id, session_id, intent.mode, intent, response,
                                  events=tuple(events), requires_confirmation=intent.requires_confirmation)
+
+        if intent.intent_type.value == "IMAGE_GENERATION" and execute_tools:
+            try:
+                creation = self.creation_fabric.dispatch("image", {"prompt": text})
+                response = f"I submitted your image request to {creation.provider}. The creation status is {creation.status}."
+                self.repository.add_message(
+                    session_id, owner_id, "assistant", response, language,
+                    intent="image_generation", status="SUCCEEDED",
+                    metadata={"request_id": request_id, "provider": creation.provider, "status": creation.status},
+                )
+                self._emit(events, "creation.completed", request_id, event_callback,
+                           capability="image", provider=creation.provider, status=creation.status)
+                return RuntimeResult(request_id, session_id, intent.mode, intent, response,
+                                     events=tuple(events), verified=False)
+            except Exception as exc:
+                response = "I can create images, but no image-generation provider is configured for this AETHON deployment yet."
+                self._emit(events, "creation.unavailable", request_id, event_callback,
+                           capability="image", error=str(exc)[:300])
+                self.repository.add_message(
+                    session_id, owner_id, "assistant", response, language,
+                    intent="image_generation", status="FAILED",
+                    metadata={"request_id": request_id},
+                )
+                return RuntimeResult(request_id, session_id, intent.mode, intent, response,
+                                     events=tuple(events), error="image provider unavailable")
 
         tool = self._tool_intent(intent)
         if tool is not None and execute_tools:
