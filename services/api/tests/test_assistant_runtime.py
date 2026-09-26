@@ -157,7 +157,7 @@ def test_unsupported_local_question_automatically_uses_web_research():
     result = rt.run(
         owner_id="owner-web-fallback",
         session_id="web-fallback",
-        text="Explain the history of the Internet",
+        text="check what is Aadhaar update",
         language="en-IN",
     )
 
