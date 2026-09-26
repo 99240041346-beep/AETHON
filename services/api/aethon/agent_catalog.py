@@ -17,6 +17,8 @@ BUILTIN_AGENTS = {
     "study": AgentDefinition("study", "StudyAgent", "Teach, quiz and track study-session outputs.", tools=("context.read",), permissions=READ, max_steps=12),
     "project": AgentDefinition("project", "ProjectAgent", "Plan project work and maintain project outputs.", tools=("project.read", "task.create", "project.write"), permissions=WRITE, max_steps=20),
     "automation": AgentDefinition("automation", "AutomationAgent", "Plan bounded automations without silently executing side effects.", tools=("automation.read", "automation.write"), permissions=WRITE, max_steps=16),
+    "ai-orchestrator": AgentDefinition("ai-orchestrator", "AIOrchestratorAgent", "Route work across configured AI providers and connected creation services.", tools=("ai.providers", "ai.generate", "web_research", "creation.dispatch"), permissions=EXECUTE, max_steps=24),
+    "creator": AgentDefinition("creator", "CreatorAgent", "Turn requirements into code, websites and media through configured providers.", tools=("ai.generate", "creation.dispatch", "deployment.verify"), permissions=EXECUTE, max_steps=24),
 }
 
 
