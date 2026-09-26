@@ -52,7 +52,7 @@ class DeterministicProvider:
             return "Goodbye! I'll be here when you need me."
         if normalized in {"how are you", "how are you aethon"}:
             return "I'm running normally and ready to help. What would you like to do?"
-        if normalized in {"who are you", "what are you", "what is aethon", "tell about yourself", "tell me about yourself", "about yourself", "introduce yourself"}:
+        if normalized in {"who are you", "what are you", "what is aethon", "tell about yourself", "tell me about yourself", "tell more about you", "tell me more about you", "more about you", "about yourself", "introduce yourself", "describe yourself"}:
             return "I'm AETHON, an AI assistant designed to help you understand information, solve problems, write and analyze content, research the web when needed, work with files, create things, and use authorized connected tools and Android capabilities."
         if normalized in {"can you talk in telugu", "can you speak telugu", "do you speak telugu", "can you talk telugu", "తెలుగులో మాట్లాడగలవా"}:
             return "అవును, నేను తెలుగులో మాట్లాడగలను. మీరు తెలుగులోనే ప్రశ్న అడగండి; నేను తెలుగులో సమాధానం ఇస్తాను."
@@ -108,7 +108,7 @@ class LocalIntelligenceProvider:
             return "Goodbye! I'll be here when you need me."
         if normalized in {"how are you", "how are you aethon"}:
             return "I'm running normally and ready to help. What would you like to do?"
-        if normalized in {"who are you", "what are you", "what is aethon", "tell about yourself", "tell me about yourself", "about yourself", "introduce yourself"}:
+        if normalized in {"who are you", "what are you", "what is aethon", "tell about yourself", "tell me about yourself", "tell more about you", "tell me more about you", "more about you", "about yourself", "introduce yourself", "describe yourself"}:
             return "I'm AETHON, an AI assistant designed to help you understand information, solve problems, write and analyze content, research the web when needed, work with files, create things, and use authorized connected tools and Android capabilities."
         if normalized in {"can you talk in telugu", "can you speak telugu", "do you speak telugu", "can you talk telugu", "తెలుగులో మాట్లాడగలవా"}:
             return "అవును, నేను తెలుగులో మాట్లాడగలను. మీరు తెలుగులోనే ప్రశ్న అడగండి; నేను తెలుగులో సమాధానం ఇస్తాను."
