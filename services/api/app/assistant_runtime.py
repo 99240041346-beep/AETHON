@@ -315,30 +315,43 @@ class AssistantRuntime:
             return RuntimeResult(request_id, session_id, intent.mode, intent, response,
                                  events=tuple(events), requires_confirmation=intent.requires_confirmation)
 
-        if intent.intent_type.value == "IMAGE_GENERATION" and execute_tools:
+        creation_capabilities = {
+            "IMAGE_GENERATION": "image",
+            "VIDEO_GENERATION": "video",
+            "DESIGN_GENERATION": "design",
+            "WEBSITE_GENERATION": "website",
+        }
+        capability = creation_capabilities.get(intent.intent_type.value)
+        if capability and execute_tools:
             try:
-                creation = self.creation_fabric.dispatch("image", {"prompt": text})
-                response = f"I submitted your image request to {creation.provider}. The creation status is {creation.status}."
+                creation = self.creation_fabric.dispatch(capability, {"prompt": text})
+                response = (
+                    f"I submitted your {capability} request to {creation.provider}. "
+                    f"The creation status is {creation.status}."
+                )
                 self.repository.add_message(
                     session_id, owner_id, "assistant", response, language,
-                    intent="image_generation", status="SUCCEEDED",
+                    intent=intent.intent_type.value.lower(), status="SUCCEEDED",
                     metadata={"request_id": request_id, "provider": creation.provider, "status": creation.status},
                 )
                 self._emit(events, "creation.completed", request_id, event_callback,
-                           capability="image", provider=creation.provider, status=creation.status)
+                           capability=capability, provider=creation.provider, status=creation.status)
                 return RuntimeResult(request_id, session_id, intent.mode, intent, response,
                                      events=tuple(events), verified=False)
-            except Exception as exc:
-                response = "I can create images, but no image-generation provider is configured for this AETHON deployment yet."
+            except Exception:
+                response = (
+                    f"I can handle {capability} creation, but no configured provider is available "
+                    "for that capability on this AETHON deployment yet."
+                )
                 self._emit(events, "creation.unavailable", request_id, event_callback,
-                           capability="image", error=str(exc)[:300])
+                           capability=capability)
                 self.repository.add_message(
                     session_id, owner_id, "assistant", response, language,
-                    intent="image_generation", status="FAILED",
+                    intent=intent.intent_type.value.lower(), status="FAILED",
                     metadata={"request_id": request_id},
                 )
                 return RuntimeResult(request_id, session_id, intent.mode, intent, response,
-                                     events=tuple(events), error="image provider unavailable")
+                                     events=tuple(events), error=f"{capability} provider unavailable")
 
         tool = self._tool_intent(intent)
         if tool is not None and execute_tools:
