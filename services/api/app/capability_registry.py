@@ -48,6 +48,7 @@ class CapabilityRegistry:
             Capability('WEB_SEARCH', 'Public web search', 'tool', available='web_search' in tools, integration='web_search'),
             Capability('WEB_FETCH', 'Secure public HTTP(S) page fetch', 'tool', available='web_fetch' in tools, integration='web_fetch'),
             Capability('CALCULATOR', 'Safe arithmetic calculation', 'tool', available='calculator' in tools, integration='calculator'),
+            Capability('CHART', 'Bar, line, pie and scatter visualizations', 'tool', available='chart' in tools, integration='chart'),
             Capability('MODEL_PROVIDER', 'Configurable model provider', 'assistant', available=model_provider != 'deterministic', integration=model_provider),
             Capability('DATABASE', 'Durable PostgreSQL persistence', 'platform', available=database.startswith(('postgres://', 'postgresql://')), integration='postgresql'),
             Capability('GITHUB', 'Authorized GitHub repository workflows', 'agent', available=bool(github), integration='github'),
