@@ -74,7 +74,7 @@ class AssistantRuntime:
         lowered = text.casefold()
         if lowered.startswith(("calculate ", "calc ")):
             return "calculator", {"expression": text.split(" ", 1)[1].strip()}
-        if any(marker in lowered for marker in ("bar chart", "line chart", "pie chart", "scatter plot", "scatter chart")):
+        if any(marker in lowered for marker in ("bar chart", "line chart", "pie chart", "histogram", "scatter plot", "scatter chart")):
             return "chart", {"text": text}
         if lowered.endswith((" → calculator", " -> calculator", " => calculator")):
             expression = text.rsplit("→", 1)[0].rsplit("->", 1)[0].rsplit("=>", 1)[0].strip()
