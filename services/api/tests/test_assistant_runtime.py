@@ -163,6 +163,19 @@ def test_check_requests_use_verified_web_research_directly():
     assert any(event.type == "tool.selected" and event.data["tool"] == "web_research" for event in result.events)
 
 
+def test_compare_requests_route_to_research():
+    class SearchProvider:
+        def search(self, query, limit):
+            return [SimpleNamespace(title="Comparison source", url="https://example.com/compare", snippet="Comparison evidence.", source="example.com")]
+    class FetchProvider:
+        def fetch(self, url):
+            return {"text": "Comparison evidence from the source."}
+    rt = AssistantRuntime(repository=fresh_repo(), model_router=ModelRouter(LocalIntelligenceProvider()), tools=ToolRegistry(SearchProvider(), FetchProvider()))
+    result = rt.run(owner_id="compare-owner", session_id="compare-1", text="compare Android and iOS", language="en-IN")
+    assert result.verified is True
+    assert any(event.type == "tool.selected" and event.data["tool"] == "web_research" for event in result.events)
+
+
 def test_unsupported_local_question_automatically_uses_web_research():
     class SearchProvider:
         def search(self, query, limit):
