@@ -94,7 +94,16 @@ def scheduler_status(owner_id: str = Depends(owner)):
 
 @app.get('/v1/model/health')
 def model_health():
-    return {'ok': model_router.health(), 'provider': model_router.provider.name}
+    provider = model_router.provider
+    configured = provider.name not in {'deterministic', 'local-intelligence'}
+    return {
+        'ok': model_router.health(),
+        'provider': provider.name,
+        'configured': configured,
+        'model': getattr(provider, 'model', None),
+        'web_search': bool(getattr(provider, 'web_search', False)),
+        'mode': 'model-backed' if configured else 'local-intelligence',
+    }
 
 @app.get('/v1/capabilities')
 def list_capabilities():
