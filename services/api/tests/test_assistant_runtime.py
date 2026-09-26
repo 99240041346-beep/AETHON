@@ -272,3 +272,23 @@ def test_followup_text_is_resolved_before_intent_routing():
     second = rt.run(owner_id="follow-owner", session_id="follow-1", text="what about solar", language="en-IN", execute_tools=False)
     assert first.session_id == second.session_id
     assert "renewable energy" in second.intent.text.lower()
+
+
+def test_ai_means_is_answered_without_remote_model():
+    rt = runtime()
+    result = rt.run(owner_id="owner-ai", session_id="ai-1", text="ai means", language="en-IN")
+    assert "artificial intelligence" in result.response.lower()
+
+
+def test_image_generation_intent_uses_creation_fabric():
+    class FakeCreation:
+        def dispatch(self, capability, payload, provider=None):
+            from aethon.creation_provider_fabric import CreationResult
+            assert capability == "image"
+            assert "image" in payload["prompt"].lower()
+            return CreationResult("test-image-provider", "image", "submitted", {"id": "img-1"})
+
+    rt = AssistantRuntime(repository=fresh_repo(), model_router=ModelRouter(DeterministicProvider()), creation_fabric=FakeCreation())
+    result = rt.run(owner_id="owner-image", session_id="image-1", text="create an image of a sunset", language="en-IN")
+    assert "test-image-provider" in result.response
+    assert any(event.type == "creation.completed" for event in result.events)
