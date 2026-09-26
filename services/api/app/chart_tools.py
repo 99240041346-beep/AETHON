@@ -6,7 +6,7 @@ from typing import Any
 
 def _chart_type(text: str) -> str | None:
     lowered = text.casefold()
-    for word, kind in (("scatter", "scatter"), ("pie", "pie"), ("line", "line"), ("bar", "bar")):
+    for word, kind in (("histogram", "histogram"), ("scatter", "scatter"), ("pie", "pie"), ("line", "line"), ("bar", "bar")):
         if word in lowered and any(token in lowered for token in ("chart", "plot", "graph")):
             return kind
     return "bar" if any(token in lowered for token in ("graph", "plot")) else None
@@ -65,6 +65,25 @@ def build_chart(text: str) -> dict[str, Any] | None:
         return None
     payload = _payload(text)
     title = _title(text, kind)
+    if kind == "histogram":
+        numbers = re.findall(r"-?\\d+(?:\\.\\d+)?", payload)
+        if len(numbers) < 2:
+            return None
+        values = [float(value) for value in numbers[:100]]
+        lo, hi = min(values), max(values)
+        if lo == hi:
+            bins = [{"category": str(lo), "value": len(values)}]
+        else:
+            count = min(10, max(3, round(len(values) ** 0.5)))
+            width = (hi - lo) / count
+            bins = []
+            for i in range(count):
+                start = lo + i * width
+                end = hi if i == count - 1 else start + width
+                n = sum(1 for value in values if (start <= value <= end if i == count - 1 else start <= value < end))
+                bins.append({"category": f"{start:.2f}–{end:.2f}", "value": n})
+        return {"chartType": "histogram", "meta": {"title": title, "description": "Frequency distribution generated from supplied numeric values."},
+                "xKey": "category", "series": [{"dataKey": "value", "label": "Frequency"}], "data": bins}
     if kind == "scatter":
         data = _scatter(payload)
         if len(data) < 2:
@@ -97,5 +116,5 @@ class ChartTool:
     def execute(self, text: str) -> dict[str, Any]:
         chart = build_chart(text)
         if chart is None:
-            raise ValueError("I need a chart type and at least two data points. Example: bar chart: Apples=30, Oranges=20.")
+            raise ValueError("I need a chart type and at least two data points. For a histogram, provide numeric values, for example: histogram: 10, 12, 12, 15, 18, 20. Example: bar chart: Apples=30, Oranges=20.")
         return chart
