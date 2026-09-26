@@ -58,7 +58,7 @@ class CapabilityRegistry:
             Capability('CODE_EXECUTION', 'Sandboxed generated-code execution', 'agent', available=False, integration='code-sandbox'),
             Capability('IMAGE_GENERATION', 'Image generation and editing', 'assistant', available=False, integration='image-provider'),
             Capability('DOCUMENT_GENERATION', 'Validated PDF/DOCX/XLSX/PPTX artifacts', 'assistant', available=False, integration='artifact-engine'),
-            Capability('VOICE', 'Speech recognition and text-to-speech', 'assistant', available=False, integration='speech-provider'),
+            Capability('VOICE', 'Browser speech recognition and text-to-speech', 'assistant', available=True, integration='browser-speech-api'),
             Capability('AUTOMATION', 'Scheduled and recurring workflows', 'agent', available=False, integration='scheduler'),
             Capability('NOTIFICATIONS', 'Task and device notifications', 'assistant', available=False, integration='notification-provider'),
         ]
