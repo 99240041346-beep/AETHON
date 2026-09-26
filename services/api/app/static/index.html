@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#08090c">
+  <meta name="description" content="AETHON — Think. Create. Act.">
+  <title>AETHON — AI Operating Platform</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><div class="brand-mark">A</div><div><strong>AETHON</strong><span>Think. Create. Act.</span></div></div>
+      <button class="new-chat" id="newChat">＋ New conversation</button>
+      <div class="side-label">Conversations</div>
+      <div class="sessions" id="sessions"></div>
+      <div class="sidebar-bottom">
+        <button class="side-action" id="capabilitiesBtn">◈ Capabilities</button>
+        <button class="side-action" id="settingsBtn">⚙ Settings</button>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn mobile-only" id="menuBtn" aria-label="Menu">☰</button>
+        <div class="top-title"><span class="status-dot"></span><span id="chatTitle">AETHON</span></div>
+        <div class="top-actions"><button class="icon-btn" id="clearBtn" title="New conversation">＋</button></div>
+      </header>
+
+      <section class="welcome" id="welcome">
+        <div class="hero-mark">A</div>
+        <h1>How can I help?</h1>
+        <p>A unified AI workspace for reasoning, research, creation and action.</p>
+        <div class="quick-grid">
+          <button data-prompt="Explain what you can do and which capabilities are currently available."><b>Explore AETHON</b><span>See what is available right now</span></button>
+          <button data-prompt="Search the web for the latest important technology news."><b>Research</b><span>Find and synthesize web information</span></button>
+          <button data-prompt="Calculate 12345 * 6789."><b>Calculate</b><span>Use a verified arithmetic tool</span></button>
+          <button data-prompt="Help me plan a software project from idea to deployment."><b>Build</b><span>Plan a project step by step</span></button>
+        </div>
+      </section>
+
+      <section class="messages" id="messages"></section>
+      <div class="typing" id="typing"><span></span><span></span><span></span><em>AETHON is working…</em></div>
+
+      <footer class="composer-wrap">
+        <div class="composer">
+          <textarea id="input" rows="1" maxlength="8000" placeholder="Message AETHON…"></textarea>
+          <button class="send" id="send" aria-label="Send">↑</button>
+        </div>
+        <div class="composer-meta"><span>Enter to send · Shift+Enter for new line</span><span id="modelStatus">Deterministic runtime</span></div>
+      </footer>
+    </main>
+  </div>
+
+  <dialog id="capDialog"><div class="dialog-head"><h2>Capabilities</h2><button class="icon-btn" data-close>×</button></div><div id="capList" class="cap-list"></div></dialog>
+  <dialog id="settingsDialog"><div class="dialog-head"><h2>Settings</h2><button class="icon-btn" data-close>×</button></div>
+    <label>API token <input id="token" type="password" placeholder="Optional if the server does not require one"></label>
+    <p class="muted">The token is stored only in this browser. AETHON will send it as a Bearer credential when configured.</p>
+    <button class="primary" id="saveSettings">Save settings</button>
+  </dialog>
+  <script src="/static/app.js"></script>
+</body>
+</html>
