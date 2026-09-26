@@ -243,11 +243,11 @@
         const chunk = await reader.read();
         if (chunk.done) break;
         buffer += decoder.decode(chunk.value, { stream: true });
-        const records = buffer.split("\\n\\n");
+        const records = buffer.split("\n\n");
         buffer = records.pop() || "";
 
         for (const record of records) {
-          const dataLine = record.split("\\n").find((line) => line.startsWith("data: "));
+          const dataLine = record.split("\n").find((line) => line.startsWith("data: "));
           if (!dataLine) continue;
 
           let data;
