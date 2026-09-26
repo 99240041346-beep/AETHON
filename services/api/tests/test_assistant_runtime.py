@@ -243,3 +243,19 @@ def test_research_rejects_non_http_sources():
     ).research("test")
     assert report.sources == []
     assert any("No usable public-web sources" in item for item in report.limitations)
+
+
+def test_memory_command_has_a_typed_intent_and_is_persisted():
+    rt = runtime()
+    result = rt.run(owner_id="memory-owner", session_id="memory-1", text="remember my favorite editor is Vim", language="en-IN")
+    assert result.intent.mode is AssistantMode.TASK
+    assert result.verified is True
+    assert "Saved that" in result.response
+
+
+def test_followup_text_is_resolved_before_intent_routing():
+    rt = runtime()
+    first = rt.run(owner_id="follow-owner", session_id="follow-1", text="research renewable energy", language="en-IN", execute_tools=False)
+    second = rt.run(owner_id="follow-owner", session_id="follow-1", text="what about solar", language="en-IN", execute_tools=False)
+    assert first.session_id == second.session_id
+    assert "renewable energy" in second.intent.text.lower()
