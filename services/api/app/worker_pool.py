@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from typing import Callable, Generic, TypeVar
 
-from .worker_lease import WorkerLeaseStore
+from .worker_lease import LeaseConflict, WorkerLeaseStore
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -22,12 +22,16 @@ class LeasedWorkerPool(Generic[T, R]):
         self.heartbeat_seconds = heartbeat_seconds
 
     def run(self, task_id: str, task: T) -> R:
-        token = self._leases.acquire(task_id, self.worker_id, self.lease_seconds)
+        try:
+            token = self._leases.acquire(task_id, self.worker_id, self.lease_seconds)
+        except LeaseConflict:
+            raise
+
         stop = threading.Event()
         lease_lost = threading.Event()
 
         def heartbeat() -> None:
-            while not stop.wait(self.heartbeat_seconds):
+            while not stop.wait(min(self.heartbeat_seconds, self.lease_seconds / 3)):
                 if not self._leases.heartbeat(task_id, self.worker_id, token, self.lease_seconds):
                     lease_lost.set()
                     return
@@ -36,7 +40,7 @@ class LeasedWorkerPool(Generic[T, R]):
         thread.start()
         try:
             result = self._worker(task)
-            if lease_lost.is_set():
+            if lease_lost.is_set() or not self.lease_is_current(task_id, token):
                 raise RuntimeError("worker lease was lost during execution")
             return result
         finally:

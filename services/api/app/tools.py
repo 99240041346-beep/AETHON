@@ -3,10 +3,31 @@ import operator as op
 from aethon.schemas import ToolResult, ToolSpec, RiskClass
 from aethon.web import WebFetcher
 from aethon.web_search import WebSearch
+from app.chart_tools import ChartTool
+from app.web_research import WebResearchAgent
+from app.data_tool import DataAnalysisTool
+from app.research_loop import AutonomousResearchLoop
+from app.research_planner import AutonomousResearchPlanner
 
 
 class CalculatorTool:
-    spec = ToolSpec(name='calculator', description='Evaluate a basic arithmetic expression safely.', risk=RiskClass.LOW)
+    spec = ToolSpec(
+        name='calculator',
+        description='Evaluate a basic arithmetic expression safely.',
+        input_schema={
+            'type': 'object',
+            'properties': {'expression': {'type': 'string', 'minLength': 1, 'maxLength': 1000}},
+            'required': ['expression'],
+            'additionalProperties': False,
+        },
+        output_schema={'type': 'number'},
+        risk=RiskClass.LOW,
+        side_effects=False,
+        timeout_seconds=5,
+        max_retries=0,
+        authentication='owner',
+        audit_required=True,
+    )
     _ops = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv, ast.Mod: op.mod, ast.Pow: op.pow, ast.USub: op.neg}
 
     def execute(self, expression: str) -> ToolResult:
@@ -28,7 +49,26 @@ class CalculatorTool:
 
 
 class WebSearchTool:
-    spec = ToolSpec(name='web_search', description='Search the public web for information.', risk=RiskClass.LOW, side_effects=False)
+    spec = ToolSpec(
+        name='web_search',
+        description='Search the public web for information.',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'query': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
+                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10},
+            },
+            'required': ['query'],
+            'additionalProperties': False,
+        },
+        output_schema={'type': 'array', 'items': {'type': 'object'}},
+        risk=RiskClass.LOW,
+        side_effects=False,
+        timeout_seconds=15,
+        max_retries=1,
+        authentication='owner',
+        audit_required=True,
+    )
 
     def __init__(self, provider=None):
         self.provider = provider or WebSearch()
@@ -45,7 +85,23 @@ class WebSearchTool:
 
 
 class WebFetchTool:
-    spec = ToolSpec(name='web_fetch', description='Fetch a public HTTP(S) web page with security limits.', risk=RiskClass.LOW, side_effects=False)
+    spec = ToolSpec(
+        name='web_fetch',
+        description='Fetch a public HTTP(S) web page with security limits.',
+        input_schema={
+            'type': 'object',
+            'properties': {'url': {'type': 'string', 'format': 'uri', 'maxLength': 4000}},
+            'required': ['url'],
+            'additionalProperties': False,
+        },
+        output_schema={'type': 'object'},
+        risk=RiskClass.LOW,
+        side_effects=False,
+        timeout_seconds=15,
+        max_retries=1,
+        authentication='owner',
+        audit_required=True,
+    )
 
     def __init__(self, fetcher=None):
         self.fetcher = fetcher or WebFetcher()
@@ -58,12 +114,105 @@ class WebFetchTool:
             return ToolResult(ok=False, error=f'web fetch failed: {exc}')
 
 
+
+class WebResearchTool:
+    spec = ToolSpec(
+        name='web_research',
+        description='Research a public-web question by searching sources, fetching pages, and assembling evidence.',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'query': {'type': 'string', 'minLength': 3, 'maxLength': 2000},
+                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10},
+                'deep': {'type': 'boolean'},
+            },
+            'required': ['query'],
+            'additionalProperties': False,
+        },
+        output_schema={'type': 'object'},
+        risk=RiskClass.LOW,
+        side_effects=False,
+        timeout_seconds=30,
+        max_retries=1,
+        authentication='owner',
+        audit_required=True,
+    )
+
+    def __init__(self, search=None, fetch=None):
+        searcher = search or WebSearch()
+        fetcher = fetch or WebFetcher()
+        self.agent = WebResearchAgent(
+            lambda query, limit: searcher.search(query, limit),
+            lambda url: fetcher.fetch(url),
+        )
+
+    def execute(self, query: str, limit: int = 5, deep: bool = False) -> ToolResult:
+        try:
+            bounded_limit = max(1, min(int(limit), 10))
+            if deep:
+                loop = AutonomousResearchLoop(
+                    AutonomousResearchPlanner(max_questions=5, max_rounds=3, sources_per_round=bounded_limit),
+                    self.agent,
+                )
+                result = loop.run(query, max_questions=5, max_rounds=3)
+                reports = result.rounds
+                sources = []
+                evidence = []
+                limitations = list(result.unresolved_gaps)
+                for report in reports:
+                    sources.extend(report.sources)
+                    evidence.extend(report.evidence)
+                    limitations.extend(report.limitations)
+                return ToolResult(ok=True, output={
+                    'query': query,
+                    'mode': 'deep',
+                    'sources': [
+                        {'title': item.title, 'url': item.url, 'snippet': item.snippet, 'source': item.source,
+                         'domain': item.domain, 'authority_score': item.authority_score}
+                        for item in sources[:bounded_limit]
+                    ],
+                    'evidence': evidence[:bounded_limit * 2],
+                    'limitations': list(dict.fromkeys(limitations))[:10],
+                }, verified=bool(sources and evidence))
+            agent = WebResearchAgent(
+                self.agent.search,
+                self.agent.fetch,
+                max_sources=bounded_limit,
+                max_content_chars=12000,
+            )
+            report = agent.research(query)
+            return ToolResult(ok=True, output={
+                'query': report.query,
+                'sources': [
+                    {'title': item.title, 'url': item.url, 'snippet': item.snippet, 'source': item.source,
+                     'domain': item.domain, 'authority_score': item.authority_score}
+                    for item in report.sources
+                ],
+                'evidence': report.evidence,
+                'limitations': report.limitations,
+            }, verified=bool(report.sources and report.evidence))
+        except Exception as exc:
+            return ToolResult(ok=False, error=f'web research failed: {exc}')
+
+class ChartToolAdapter:
+    spec = ToolSpec(**ChartTool().spec)
+
+    def execute(self, text: str) -> ToolResult:
+        try:
+            return ToolResult(ok=True, output=ChartTool().execute(text))
+        except Exception as exc:
+            return ToolResult(ok=False, error=str(exc))
+
+
 class ToolRegistry:
     def __init__(self, web_search=None, web_fetch=None):
         self._tools = {
             'calculator': CalculatorTool(),
             'web_search': WebSearchTool(web_search),
             'web_fetch': WebFetchTool(web_fetch),
+            'web_research': WebResearchTool(web_search, web_fetch),
+            'chart': ChartToolAdapter(),
+            'data_analyze': DataAnalysisTool(),
         }
 
     def list(self):
@@ -72,5 +221,9 @@ class ToolRegistry:
     def execute(self, request):
         tool = self._tools.get(request.tool)
         if not tool:
-            return ToolResult(ok=False, error='tool not found')
-        return tool.execute(**request.arguments)
+            return ToolResult(ok=False, error='tool not found', request_id=request.request_id)
+        try:
+            result = tool.execute(**request.arguments)
+            return result.model_copy(update={'request_id': request.request_id})
+        except Exception as exc:
+            return ToolResult(ok=False, error=f'tool execution failed: {exc}', request_id=request.request_id)

@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+import re
+from typing import Any
+
+
+def _chart_type(text: str) -> str | None:
+    lowered = text.casefold()
+    for word, kind in (("histogram", "histogram"), ("scatter", "scatter"), ("pie", "pie"), ("line", "line"), ("bar", "bar")):
+        if word in lowered and any(token in lowered for token in ("chart", "plot", "graph")):
+            return kind
+    return "bar" if any(token in lowered for token in ("graph", "plot")) else None
+
+
+def _payload(text: str) -> str:
+    lowered = text.casefold()
+    for marker in ("data:", "values:"):
+        position = lowered.find(marker)
+        if position >= 0:
+            return text[position + len(marker):].strip()
+    for marker in (" of ", " for ", " showing "):
+        position = lowered.find(marker)
+        if position >= 0:
+            tail = text[position + len(marker):]
+            if re.search(r"[=:]|-?\d+(?:\.\d+)?", tail):
+                return tail.strip(" .")
+    return text
+
+
+def _title(text: str, kind: str) -> str:
+    cleaned = re.sub(r"(?i)\b(create|make|draw|show|generate|plot|graph|a|an|the)\b", " ", text)
+    cleaned = re.sub(r"(?i)\b(bar|line|pie|scatter)\s+(?:chart|plot|graph)\b", " ", cleaned)
+    cleaned = re.sub(r"(?i)\b(data|values)\s*:", " ", cleaned)
+    cleaned = re.sub(r"[:;,]+.*$", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -")
+    return cleaned[:80].title() if cleaned else f"{kind.title()} chart"
+
+
+def _pairs(payload: str) -> list[tuple[str, float]]:
+    pairs = []
+    for chunk in re.split(r"[,;\n]+", payload):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        match = re.match(r"""^\s*["']?(.+?)["']?\s*(?:=|:)\s*(-?\d+(?:\.\d+)?)\s*$""", chunk)
+        if not match:
+            match = re.match(r"""^\s*([A-Za-z][A-Za-z0-9 _-]{0,50})\s+(-?\d+(?:\.\d+)?)\s*$""", chunk)
+        if match:
+            pairs.append((match.group(1).strip(" \"'"), float(match.group(2))))
+    return pairs[:30]
+
+
+def _scatter(payload: str) -> list[dict[str, float]]:
+    points = []
+    for chunk in re.split(r"[;\n]+", payload):
+        nums = re.findall(r"-?\d+(?:\.\d+)?", chunk)
+        if len(nums) >= 2:
+            points.append({"x": float(nums[0]), "y": float(nums[1])})
+    return points[:50]
+
+
+
+def _numbers(payload: str) -> list[float]:
+    return [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", payload)][:100]
+
+
+def _histogram(payload: str) -> list[dict[str, Any]]:
+    numbers = _numbers(payload)
+    if len(numbers) < 2:
+        return []
+    # Deterministic bounded binning: up to 10 equal-width bins.
+    lo, hi = min(numbers), max(numbers)
+    if lo == hi:
+        return [{"category": str(lo), "value": len(numbers)}]
+    bins = min(10, max(2, round(len(numbers) ** 0.5)))
+    width = (hi - lo) / bins
+    counts = [0] * bins
+    for number in numbers:
+        index = min(bins - 1, int((number - lo) / width))
+        counts[index] += 1
+    return [
+        {"category": f"{lo + i * width:.2f}–{lo + (i + 1) * width:.2f}", "value": count}
+        for i, count in enumerate(counts) if count
+    ]
+
+def build_chart(text: str) -> dict[str, Any] | None:
+    kind = _chart_type(text)
+    if kind is None:
+        return None
+    payload = _payload(text)
+    title = _title(text, kind)
+    if kind == "histogram":
+        numbers = re.findall(r"-?\\d+(?:\\.\\d+)?", payload)
+        if len(numbers) < 2:
+            return None
+        values = [float(value) for value in numbers[:100]]
+        lo, hi = min(values), max(values)
+        if lo == hi:
+            bins = [{"category": str(lo), "value": len(values)}]
+        else:
+            count = min(10, max(3, round(len(values) ** 0.5)))
+            width = (hi - lo) / count
+            bins = []
+            for i in range(count):
+                start = lo + i * width
+                end = hi if i == count - 1 else start + width
+                n = sum(1 for value in values if (start <= value <= end if i == count - 1 else start <= value < end))
+                bins.append({"category": f"{start:.2f}–{end:.2f}", "value": n})
+        return {"chartType": "histogram", "meta": {"title": title, "description": "Frequency distribution generated from supplied numeric values."},
+                "xKey": "category", "series": [{"dataKey": "value", "label": "Frequency"}], "data": bins}
+    if kind == "histogram":
+        data = _histogram(payload)
+        if not data:
+            return None
+        return {"chartType": "histogram", "meta": {"title": title, "description": "Frequency distribution generated from the supplied numeric values."},
+                "xKey": "category", "series": [{"dataKey": "value", "label": "Frequency"}], "data": data}
+    if kind == "scatter":
+        data = _scatter(payload)
+        if len(data) < 2:
+            return None
+        return {"chartType": "scatter", "meta": {"title": title, "description": "Chart generated from supplied numeric pairs."},
+                "xKey": "x", "xAxisLabel": "X", "series": [{"dataKey": "y", "label": "Y"}], "data": data}
+    pairs = _pairs(payload)
+    if len(pairs) < 2:
+        return None
+    if kind == "pie":
+        return {"chartType": "pie", "meta": {"title": title, "description": "Part-to-whole chart generated from supplied values."},
+                "nameKey": "category", "valueKey": "value", "series": [{"dataKey": "value", "label": "Value"}],
+                "data": [{"category": k, "value": v} for k, v in pairs]}
+    return {"chartType": kind, "meta": {"title": title, "description": "Chart generated from supplied values."},
+            "xKey": "category", "series": [{"dataKey": "value", "label": "Value"}],
+            "data": [{"category": k, "value": v} for k, v in pairs]}
+
+
+class ChartTool:
+    def __init__(self) -> None:
+        self.spec = {
+            "name": "chart",
+            "description": "Create a bar, line, pie, or scatter visualization from user-supplied data.",
+            "input_schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 8000}},
+                             "required": ["text"], "additionalProperties": False},
+            "output_schema": {"type": "object"}, "risk": "LOW", "side_effects": False,
+            "timeout_seconds": 5, "max_retries": 0, "authentication": "owner", "audit_required": True,
+        }
+
+    def execute(self, text: str) -> dict[str, Any]:
+        chart = build_chart(text)
+        if chart is None:
+            raise ValueError("I need a chart type and at least two data points. For a histogram, provide numeric values, for example: histogram: 10, 12, 12, 15, 18, 20. Example: bar chart: Apples=30, Oranges=20.")
+        return chart

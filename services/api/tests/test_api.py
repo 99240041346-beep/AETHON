@@ -28,7 +28,7 @@ def test_task_vertical_slice_and_audit():
         try:
             result = store.create(__import__('aethon.schemas', fromlist=['TaskCreate']).TaskCreate(goal='hello AETHON'))
             assert result.status.value == 'SUCCEEDED'
-            assert 'AETHON received' in result.result
+            assert 'AETHON is running in deterministic mode' in result.result
             events = store.events(result.task_id)
             assert [e.data.get('status') for e in events if e.type == 'task.state_changed'] == ['PLANNING', 'EXECUTING', 'VERIFYING', 'EXECUTING', 'SUCCEEDED']
             audit = store.audit(result.task_id)

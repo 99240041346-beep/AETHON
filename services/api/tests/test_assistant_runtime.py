@@ -1,0 +1,294 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from aethon.assistant_orchestrator import AssistantMode
+from aethon.model_router import DeterministicProvider, LocalIntelligenceProvider, ModelRouter
+from aethon.schemas import RiskClass, ToolSpec
+from app.assistant_repository import AssistantRepository
+from app.assistant_runtime import AssistantRuntime
+from app.tools import ToolRegistry
+
+
+def fresh_repo() -> AssistantRepository:
+    AssistantRepository._memory_sessions.clear()
+    AssistantRepository._memory_messages.clear()
+    return AssistantRepository(database_url="")
+
+
+def runtime() -> AssistantRuntime:
+    return AssistantRuntime(
+        repository=fresh_repo(),
+        model_router=ModelRouter(DeterministicProvider()),
+    )
+
+
+def test_chat_uses_session_context_and_persists_response():
+    rt = runtime()
+    first = rt.run(owner_id="owner-a", session_id="s1", text="Hello", language="en-IN")
+    second = rt.run(owner_id="owner-a", session_id="s1", text="Continue", language="en-IN")
+
+    assert first.mode is AssistantMode.CHAT
+    assert second.session_id == "s1"
+    assert "Continue" in second.response
+    history = rt.repository.history("s1", "owner-a")
+    assert [row["role"] for row in history] == ["user", "assistant", "user", "assistant"]
+
+
+def test_calculator_tool_is_routed_and_recorded():
+    rt = runtime()
+    result = rt.run(owner_id="owner-a", session_id="s2", text="calculate 12 * 3", language="en-IN")
+
+    assert result.tool_result is not None
+    assert result.tool_result.ok is True
+    assert result.tool_result.output == 36
+    assert any(event.type == "tool.completed" for event in result.events)
+    assert result.verified is False
+
+
+def test_side_effecting_tool_requires_approval_without_execution():
+    class SideEffectRegistry:
+        spec = ToolSpec(
+            name="dangerous_test_tool",
+            description="Test-only side effecting tool.",
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+            risk=RiskClass.HIGH,
+            side_effects=True,
+            timeout_seconds=5,
+            max_retries=0,
+            authentication="owner",
+            audit_required=True,
+        )
+
+        def list(self):
+            return [self.spec]
+
+        def execute(self, request):
+            raise AssertionError("tool executed without approval")
+
+    rt = runtime()
+    rt.tools = SideEffectRegistry()
+    original = rt._tool_intent
+    rt._tool_intent = lambda intent: ("dangerous_test_tool", {})
+    try:
+        result = rt.run(
+            owner_id="owner-a",
+            session_id="s5",
+            text="run dangerous_test_tool",
+            language="en-IN",
+            require_approval=False,
+        )
+    finally:
+        rt._tool_intent = original
+
+    assert result.requires_confirmation is True
+    assert result.action_authorized is False
+    assert result.error is None
+    assert any(event.type == "approval.required" for event in result.events)
+
+
+def test_action_is_planned_but_not_executed_by_model_runtime():
+    rt = runtime()
+    result = rt.run(owner_id="owner-a", session_id="s3", text="click Settings", language="en-IN")
+
+    assert result.mode is AssistantMode.ACTION
+    assert result.intent.action == "android.screen_click"
+    assert result.requires_confirmation is True
+    assert result.action_authorized is False
+    assert result.verified is False
+    assert any(event.type == "action.planned" for event in result.events)
+
+
+def test_model_failure_is_truthful_and_persisted():
+    class FailingProvider:
+        name = "test-failing"
+
+        def generate(self, prompt: str, user_text: str | None = None) -> str:
+            raise RuntimeError("offline")
+
+        def health(self) -> bool:
+            return False
+
+    rt = AssistantRuntime(repository=fresh_repo(), model_router=ModelRouter(FailingProvider()))
+    result = rt.run(owner_id="owner-a", session_id="s4", text="What is AETHON?", language="en-IN")
+
+    assert result.response.startswith("I couldn't reach the configured AI model")
+    assert any(event.type == "model.failed" for event in result.events)
+    assert rt.repository.history("s4", "owner-a")[-1]["status"] == "FAILED"
+
+
+def test_new_conversation_gets_safe_local_title():
+    rt = runtime()
+    result = rt.run(owner_id="owner-title", session_id="title-1", text="Build a weather dashboard for farmers", language="en-IN")
+
+    assert result.session_id == "title-1"
+    session = rt.repository.session("title-1", "owner-title")
+    assert session is not None
+    assert session["title"] == "Build a weather dashboard for farmers"
+
+
+def test_local_intelligence_provider_handles_hello_aethon():
+    provider = LocalIntelligenceProvider()
+    assert provider.generate("", user_text="hello aethon") == "Hello! I'm AETHON. How can I help you today?"
+
+
+def test_check_requests_use_verified_web_research_directly():
+    class SearchProvider:
+        def search(self, query, limit):
+            return [SimpleNamespace(
+                title="UIDAI",
+                url="https://uidai.gov.in/",
+                snippet="Official Aadhaar information.",
+                source="uidai.gov.in",
+            )]
+
+    class FetchProvider:
+        def fetch(self, url):
+            return {"text": "Official Aadhaar information and update guidance."}
+
+    rt = AssistantRuntime(
+        repository=fresh_repo(),
+        model_router=ModelRouter(LocalIntelligenceProvider()),
+        tools=ToolRegistry(SearchProvider(), FetchProvider()),
+    )
+    result = rt.run(
+        owner_id="owner-check",
+        session_id="check-1",
+        text="check what is Aadhaar update",
+        language="en-IN",
+    )
+    assert result.verified is True
+    assert "UIDAI" in result.response
+    assert any(event.type == "tool.selected" and event.data["tool"] == "web_research" for event in result.events)
+
+
+def test_compare_requests_route_to_research():
+    class SearchProvider:
+        def search(self, query, limit):
+            return [SimpleNamespace(title="Comparison source", url="https://example.com/compare", snippet="Comparison evidence.", source="example.com")]
+    class FetchProvider:
+        def fetch(self, url):
+            return {"text": "Comparison evidence from the source."}
+    rt = AssistantRuntime(repository=fresh_repo(), model_router=ModelRouter(LocalIntelligenceProvider()), tools=ToolRegistry(SearchProvider(), FetchProvider()))
+    result = rt.run(owner_id="compare-owner", session_id="compare-1", text="compare Android and iOS", language="en-IN")
+    assert result.verified is True
+    assert any(event.type == "tool.selected" and event.data["tool"] == "web_research" for event in result.events)
+
+
+def test_generic_local_question_does_not_automatically_trigger_web_research():
+    rt = AssistantRuntime(
+        repository=fresh_repo(),
+        model_router=ModelRouter(LocalIntelligenceProvider()),
+        tools=ToolRegistry(),
+    )
+    result = rt.run(
+        owner_id="owner-web-fallback",
+        session_id="web-fallback",
+        text="explain quantum computing",
+        language="en-IN",
+    )
+
+    assert result.verified is False
+    assert not any(event.type == "research.fallback" for event in result.events)
+    assert not any(event.type == "tool.selected" and event.data.get("tool") == "web_research" for event in result.events)
+
+
+def test_fresh_local_question_can_use_web_research_fallback():
+    class SearchProvider:
+        def search(self, query, limit):
+            return [SimpleNamespace(
+                title="Example source",
+                url="https://example.com/fact",
+                snippet="A source-backed fact about the latest topic.",
+                source="example.com",
+            )]
+
+    class FetchProvider:
+        def fetch(self, url):
+            return {"text": "Current source-backed information."}
+
+    rt = AssistantRuntime(
+        repository=fresh_repo(),
+        model_router=ModelRouter(LocalIntelligenceProvider()),
+        tools=ToolRegistry(SearchProvider(), FetchProvider()),
+    )
+    result = rt.run(
+        owner_id="owner-web-fresh",
+        session_id="web-fresh",
+        text="latest information about quantum computing",
+        language="en-IN",
+    )
+
+    assert result.verified is True
+    assert any(event.type == "research.fallback" for event in result.events)
+
+
+def test_research_prefers_authoritative_and_diverse_sources():
+    from app.web_research import WebResearchAgent
+
+    class Search:
+        def __call__(self, query, limit):
+            return [
+                SimpleNamespace(title="Generic copy", url="https://blog.example.com/a", snippet="copy", source="blog"),
+                SimpleNamespace(title="UIDAI official", url="https://uidai.gov.in/aadhaar", snippet="official", source="uidai"),
+                SimpleNamespace(title="Duplicate", url="https://UIDAI.GOV.IN/aadhaar/", snippet="duplicate", source="uidai"),
+                SimpleNamespace(title="Other government", url="https://example.gov.in/info", snippet="gov", source="gov"),
+            ]
+
+    class Fetch:
+        def __call__(self, url):
+            return {"text": f"content for {url}"}
+
+    report = WebResearchAgent(Search(), Fetch(), max_sources=3).research("Aadhaar update")
+    assert report.sources[0].domain == "uidai.gov.in"
+    assert report.sources[0].authority_score >= 160
+    assert len({source.domain for source in report.sources}) == 3
+    assert len(report.sources) == 3
+
+
+def test_research_rejects_non_http_sources():
+    from app.web_research import WebResearchAgent
+
+    report = WebResearchAgent(
+        lambda query, limit: [SimpleNamespace(title="bad", url="javascript:alert(1)", snippet="x", source="bad")],
+        lambda url: {"text": "should not fetch"},
+    ).research("test")
+    assert report.sources == []
+    assert any("No usable public-web sources" in item for item in report.limitations)
+
+
+def test_memory_command_has_a_typed_intent_and_is_persisted():
+    rt = runtime()
+    result = rt.run(owner_id="memory-owner", session_id="memory-1", text="remember my favorite editor is Vim", language="en-IN")
+    assert result.intent.mode is AssistantMode.TASK
+    assert result.verified is True
+    assert "Saved that" in result.response
+
+
+def test_followup_text_is_resolved_before_intent_routing():
+    rt = runtime()
+    first = rt.run(owner_id="follow-owner", session_id="follow-1", text="research renewable energy", language="en-IN", execute_tools=False)
+    second = rt.run(owner_id="follow-owner", session_id="follow-1", text="what about solar", language="en-IN", execute_tools=False)
+    assert first.session_id == second.session_id
+    assert "renewable energy" in second.intent.text.lower()
+
+
+def test_ai_means_is_answered_without_remote_model():
+    rt = runtime()
+    result = rt.run(owner_id="owner-ai", session_id="ai-1", text="ai means", language="en-IN")
+    assert "artificial intelligence" in result.response.lower()
+
+
+def test_image_generation_intent_uses_creation_fabric():
+    class FakeCreation:
+        def dispatch(self, capability, payload, provider=None):
+            from aethon.creation_provider_fabric import CreationResult
+            assert capability == "image"
+            assert "image" in payload["prompt"].lower()
+            return CreationResult("test-image-provider", "image", "submitted", {"id": "img-1"})
+
+    rt = AssistantRuntime(repository=fresh_repo(), model_router=ModelRouter(DeterministicProvider()), creation_fabric=FakeCreation())
+    result = rt.run(owner_id="owner-image", session_id="image-1", text="create an image of a sunset", language="en-IN")
+    assert "test-image-provider" in result.response
+    assert any(event.type == "creation.completed" for event in result.events)

@@ -4,6 +4,8 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from aethon.auth import current_owner, security
 from aethon.execution_safety_gate import ExecutionAuthorizationError, SafetyExecutionGate
@@ -18,8 +20,15 @@ from aethon.migrations import migrate_from_environment
 from aethon.voice_api import router as voice_router
 from aethon.device_gateway_api import router as device_router
 from aethon.assistant_api import router as assistant_router
+from app.assistant_runtime_api import router as assistant_runtime_router
 from app.language_api import router as language_router
 from aethon.android_command_transport_api import router as android_command_transport_router
+from app.capability_registry import CapabilityRegistry
+from app.agent_api import router as agent_router
+from app.project_api import router as project_router
+from app.search_api import router as search_router
+from app.integration_api import router as integration_router
+from app.ai_factory_api import router as ai_factory_router
 
 
 def build_task_store():
@@ -38,19 +47,46 @@ tools = ToolRegistry()
 safety = SafetyKernel()
 safety_gate = SafetyExecutionGate(safety)
 model_router = ModelRouter()
+capabilities = CapabilityRegistry({spec.name for spec in tools.list()})
 app.include_router(voice_router)
 app.include_router(device_router)
 app.include_router(assistant_router)
+app.include_router(assistant_runtime_router)
 app.include_router(language_router)
 app.include_router(android_command_transport_router)
+app.include_router(agent_router)
+app.include_router(project_router)
+app.include_router(search_router)
+app.include_router(integration_router)
+app.include_router(ai_factory_router)
+app.mount('/static', StaticFiles(directory=os.path.join(os.path.dirname(__file__), 'static')), name='static')
 
 
 def owner(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> str:
     return current_owner(credentials)
 
+@app.get('/')
+def root():
+    return FileResponse(os.path.join(os.path.dirname(__file__), 'static', 'index.html'))
+
+@app.get('/service-info')
+def service_info():
+    return {
+        'ok': True,
+        'service': 'aethon-api',
+        'version': app.version,
+        'health': '/health',
+        'readiness': '/ready',
+        'capabilities': '/v1/capabilities',
+        'assistant': '/v1/assistant/runtime/respond',
+        'stream': '/v1/assistant/runtime/stream',
+        'docs': '/docs',
+        'frontend': '/',
+    }
+
 @app.get('/health')
 def health():
-    return {'ok': True, 'service': 'aethon-api'}
+    return {'ok': True, 'service': 'aethon-api', 'version': app.version}
 
 @app.get('/ready')
 def ready():
@@ -68,13 +104,26 @@ def scheduler_status(owner_id: str = Depends(owner)):
 
 @app.get('/v1/model/health')
 def model_health():
-    return {'ok': model_router.health(), 'provider': model_router.provider.name}
+    provider = model_router.provider
+    configured = provider.name not in {'deterministic', 'local-intelligence'}
+    return {
+        'ok': model_router.health(),
+        'provider': provider.name,
+        'configured': configured,
+        'model': getattr(provider, 'model', None),
+        'web_search': bool(getattr(provider, 'web_search', False)),
+        'mode': 'model-backed' if configured else 'local-intelligence',
+    }
+
+@app.get('/v1/capabilities')
+def list_capabilities():
+    return {'ok': True, 'capabilities': capabilities.list()}
 
 @app.get('/v1/tools')
 def list_tools(): return tools.list()
 
 @app.post('/v1/tools/execute')
-def execute_tool(request: ToolRequest):
+def execute_tool(request: ToolRequest, owner_id: str = Depends(owner)):
     spec = next((x for x in tools.list() if x.name == request.tool), None)
     if not spec: raise HTTPException(404, 'tool not found')
     try:
@@ -83,7 +132,27 @@ def execute_tool(request: ToolRequest):
         raise HTTPException(403, str(exc)) from exc
     if authorization.effective_decision != 'ALLOW':
         raise HTTPException(403, 'execution blocked by safety policy')
-    return tools.execute(request)
+    result = tools.execute(request)
+    # Preserve the established API contract while exposing the richer ToolResult.
+    # Tool failures are normal execution outcomes, not gateway failures.
+    if not result.ok:
+        return {
+            'ok': False,
+            'owner_id': owner_id,
+            'tool': request.tool,
+            'error': result.error or 'tool execution failed',
+            'request_id': str(result.request_id or request.request_id),
+            'verified': result.verified,
+        }
+    return {
+        'ok': True,
+        'owner_id': owner_id,
+        'tool': request.tool,
+        'result': result.output,
+        'output': result.output,
+        'request_id': str(result.request_id or request.request_id),
+        'verified': result.verified,
+    }
 
 @app.post('/v1/memory')
 def create_memory(request: MemoryWriteRequest, owner_id: str = Depends(owner)):

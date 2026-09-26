@@ -11,7 +11,7 @@ def test_android_open_app_becomes_bounded_action():
     result = AssistantOrchestrator().classify("open YouTube")
     assert result.intent if False else result.mode is AssistantMode.ACTION
     assert result.action == "android.open_app"
-    assert result.arguments == {"app": "YouTube"}
+    assert result.arguments == {"app": "YouTube", "package": "com.google.android.youtube"}
     assert result.requires_confirmation is False
 
 

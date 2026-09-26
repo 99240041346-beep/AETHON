@@ -14,49 +14,25 @@ ANDROID_CAPABILITIES = {
 
 def test_gateway_accepts_native_android_capabilities() -> None:
     gateway = DeviceGateway()
-    result = gateway.register(
-        owner_id="owner-1",
-        device_id="android-1",
-        platform="android",
-        capabilities=ANDROID_CAPABILITIES,
-    )
-    assert result["device_id"] == "android-1"
+    result = gateway.register(owner_id="owner-1", device_id="android-capabilities-1", platform="android", capabilities=ANDROID_CAPABILITIES)
+    assert result["device_id"] == "android-capabilities-1"
     assert len(result["device_token"]) >= 20
-    status = gateway.status(device_id="android-1", owner_id="owner-1")
+    status = gateway.status(device_id="android-capabilities-1", owner_id="owner-1")
     assert ANDROID_CAPABILITIES.issubset(set(status["capabilities"]))
 
 
 def test_legacy_app_open_remains_accepted_by_gateway() -> None:
     assert Capability.APP_OPEN.value == "APP_OPEN"
     gateway = DeviceGateway()
-    result = gateway.register(
-        owner_id="owner-1",
-        device_id="android-legacy",
-        platform="android",
-        capabilities={"APP_OPEN"},
-    )
-    assert result["device_id"] == "android-legacy"
+    result = gateway.register(owner_id="owner-1", device_id="android-legacy-1", platform="android", capabilities={"APP_OPEN"})
+    assert result["device_id"] == "android-legacy-1"
 
 
 def test_native_open_app_is_authorized_as_low_risk() -> None:
     gateway = DeviceGateway()
-    registration = gateway.register(
-        owner_id="owner-1",
-        device_id="android-1",
-        platform="android",
-        capabilities={"OPEN_APP"},
-    )
+    registration = gateway.register(owner_id="owner-1", device_id="android-open-app-1", platform="android", capabilities={"OPEN_APP"})
     now = time.time()
-    envelope = CommandEnvelope(
-        command_id="cmd-1",
-        device_id="android-1",
-        capability="OPEN_APP",
-        payload={"package_name": "com.example.app"},
-        issued_at=now,
-        expires_at=now + 15,
-        nonce="nonce-open-app-1",
-        idempotency_key="idem-1",
-    )
+    envelope = CommandEnvelope("cmd-open-app-1", "android-open-app-1", "OPEN_APP", {"package_name": "com.example.app"}, now, now + 15, "nonce-open-app-1", "idem-open-app-1")
     result = gateway.authorize_command(envelope, owner_id="owner-1", token=registration["device_token"])
     assert result["authorized"] is True
     assert result["capability"] == "OPEN_APP"
@@ -66,9 +42,4 @@ def test_native_open_app_is_authorized_as_low_risk() -> None:
 def test_unimplemented_close_app_is_not_in_gateway_contract() -> None:
     gateway = DeviceGateway()
     with pytest.raises(GatewayError, match="undeclared device capability"):
-        gateway.register(
-            owner_id="owner-1",
-            device_id="android-1",
-            platform="android",
-            capabilities={"CLOSE_APP"},
-        )
+        gateway.register(owner_id="owner-1", device_id="android-close-app-1", platform="android", capabilities={"CLOSE_APP"})
