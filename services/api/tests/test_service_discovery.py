@@ -9,6 +9,12 @@ client = TestClient(app)
 def test_root_discovery():
     response = client.get("/")
     assert response.status_code == 200
+    assert "AETHON" in response.text
+    assert "Message AETHON" in response.text
+
+def test_service_info_discovery():
+    response = client.get("/service-info")
+    assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
     assert payload["service"] == "aethon-api"
