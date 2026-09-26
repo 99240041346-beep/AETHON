@@ -187,7 +187,7 @@ def test_unsupported_local_question_automatically_uses_web_research():
     result = rt.run(
         owner_id="owner-web-fallback",
         session_id="web-fallback",
-        text="check what is Aadhaar update",
+        text="explain quantum computing",
         language="en-IN",
     )
 
