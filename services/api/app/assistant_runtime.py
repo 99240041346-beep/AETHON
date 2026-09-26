@@ -77,9 +77,21 @@ class AssistantRuntime:
             expression = text.rsplit("→", 1)[0].rsplit("->", 1)[0].rsplit("=>", 1)[0].strip()
             if expression:
                 return "calculator", {"expression": expression}
-        import re
-        if re.fullmatch(r"[0-9\s+\-*/%.()]+", text):
-            return "calculator", {"expression": text}
+        # Deterministic arithmetic routing. Normalize common calculator symbols
+        # before validation so user-entered Unicode operators work as expected.
+        normalized = (
+            text.strip()
+            .replace("×", "*")
+            .replace("÷", "/")
+            .replace("−", "-")
+        )
+        allowed = set("0123456789+-*/%.() ")
+        if (
+            normalized
+            and any(char in normalized for char in "+-*/%")
+            and all(char in allowed for char in normalized)
+        ):
+            return "calculator", {"expression": normalized}
         for prefix in ("search web for ", "search the web for ", "web search "):
             if lowered.startswith(prefix):
                 return "web_search", {"query": text[len(prefix):].strip(), "limit": 5}
