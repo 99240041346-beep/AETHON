@@ -5,7 +5,7 @@ from aethon.model_router import DeterministicProvider, ModelRouter, OpenAIRespon
 
 
 def test_deterministic_provider():
-    assert ModelRouter(DeterministicProvider()).generate("hello") == "AETHON received: hello"
+    assert ModelRouter(DeterministicProvider()).generate("hello") == "AETHON is running in deterministic mode. I received: hello"
 
 
 def test_unknown_provider_rejected(monkeypatch):
