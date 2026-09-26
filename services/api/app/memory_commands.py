@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from aethon.memory_engine import MemorySecurityError, redact_secrets
+from aethon.memory_policy import MemoryPolicy
 from aethon.memory_repository import MemoryRepository
 
 
@@ -25,6 +26,7 @@ class NaturalMemory:
 
     def __init__(self, repository: MemoryRepository | None = None):
         self.repository = repository or MemoryRepository()
+        self.policy = MemoryPolicy()
 
     def parse(self, text: str) -> MemoryCommand | None:
         value = " ".join(text.strip().split())
@@ -46,6 +48,9 @@ class NaturalMemory:
     def execute(self, command: MemoryCommand, *, owner_id: str, project_id: str | None = None) -> dict[str, Any]:
         namespace = "project" if project_id else "default"
         if command.action == "remember":
+            candidate = self.policy.extract("remember " + command.content)
+            if candidate is None or not self.policy.can_store(candidate):
+                raise MemorySecurityError("memory content is not eligible for storage")
             content = redact_secrets(command.content).strip()
             if not content or content == "[REDACTED]":
                 raise MemorySecurityError("memory content contains only protected secret material")
