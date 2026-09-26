@@ -106,7 +106,7 @@ class AssistantRuntime:
                 if lowered.startswith(prefix):
                     query = text[len(prefix):].strip() or text
                     break
-            return "web_research", {"query": query, "limit": 5, "deep": True}
+            return "web_research", {"query": query, "limit": 5}
         if lowered.startswith(("research ", "deep research ", "investigate ", "compare sources for ",
                                 "check ", "look up ", "find out ", "verify ")):
             # Explicit current/verification language goes through evidence-producing research.
