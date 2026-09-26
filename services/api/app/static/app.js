@@ -281,7 +281,19 @@
     const max = Math.max(...values, 1), min = Math.min(...values, 0);
     const span = max - min || 1;
     let body = "";
-    if (type === "pie") {
+    if (type === "histogram") {
+      const key = spec.series?.[0]?.dataKey || "value";
+      const step = (width-left-right) / Math.max(data.length, 1);
+      const maxFreq = Math.max(...data.map(row => Number(row[key]) || 0), 1);
+      const bars = data.map((row, i) => {
+        const value = Number(row[key]) || 0;
+        const x = left + step * i + 2;
+        const barWidth = Math.max(2, step - 4);
+        const y = height-bottom - (value / maxFreq) * (height-top-bottom);
+        return `<rect class="chart-bar" x="${x}" y="${y}" width="${barWidth}" height="${Math.max(1, height-bottom-y)}"><title>${esc(row[spec.xKey || "category"])}: ${value}</title></rect>`;
+      }).join("");
+      body = `<svg viewBox="0 0 720 330" role="img" aria-label="${title}"><line class="chart-axis" x1="${left}" y1="${height-bottom}" x2="${width-right}" y2="${height-bottom}"/><line class="chart-axis" x1="${left}" y1="${top}" x2="${left}" y2="${height-bottom}"/>${bars}</svg>`;
+    } else if (type === "pie") {
       const total = data.reduce((sum, row) => sum + Math.max(0, Number(row[spec.valueKey || "value"]) || 0), 0) || 1;
       let angle = -Math.PI / 2;
       const cx = 250, cy = 190, radius = 105;
