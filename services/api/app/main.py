@@ -26,6 +26,7 @@ from aethon.android_command_transport_api import router as android_command_trans
 from app.capability_registry import CapabilityRegistry
 from app.agent_api import router as agent_router
 from app.project_api import router as project_router
+from app.search_api import router as search_router
 
 
 def build_task_store():
@@ -53,6 +54,7 @@ app.include_router(language_router)
 app.include_router(android_command_transport_router)
 app.include_router(agent_router)
 app.include_router(project_router)
+app.include_router(search_router)
 app.mount('/static', StaticFiles(directory=os.path.join(os.path.dirname(__file__), 'static')), name='static')
 
 
