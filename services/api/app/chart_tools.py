@@ -59,6 +59,30 @@ def _scatter(payload: str) -> list[dict[str, float]]:
     return points[:50]
 
 
+
+def _numbers(payload: str) -> list[float]:
+    return [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", payload)][:100]
+
+
+def _histogram(payload: str) -> list[dict[str, Any]]:
+    numbers = _numbers(payload)
+    if len(numbers) < 2:
+        return []
+    # Deterministic bounded binning: up to 10 equal-width bins.
+    lo, hi = min(numbers), max(numbers)
+    if lo == hi:
+        return [{"category": str(lo), "value": len(numbers)}]
+    bins = min(10, max(2, round(len(numbers) ** 0.5)))
+    width = (hi - lo) / bins
+    counts = [0] * bins
+    for number in numbers:
+        index = min(bins - 1, int((number - lo) / width))
+        counts[index] += 1
+    return [
+        {"category": f"{lo + i * width:.2f}–{lo + (i + 1) * width:.2f}", "value": count}
+        for i, count in enumerate(counts) if count
+    ]
+
 def build_chart(text: str) -> dict[str, Any] | None:
     kind = _chart_type(text)
     if kind is None:
@@ -84,6 +108,12 @@ def build_chart(text: str) -> dict[str, Any] | None:
                 bins.append({"category": f"{start:.2f}–{end:.2f}", "value": n})
         return {"chartType": "histogram", "meta": {"title": title, "description": "Frequency distribution generated from supplied numeric values."},
                 "xKey": "category", "series": [{"dataKey": "value", "label": "Frequency"}], "data": bins}
+    if kind == "histogram":
+        data = _histogram(payload)
+        if not data:
+            return None
+        return {"chartType": "histogram", "meta": {"title": title, "description": "Frequency distribution generated from the supplied numeric values."},
+                "xKey": "category", "series": [{"dataKey": "value", "label": "Frequency"}], "data": data}
     if kind == "scatter":
         data = _scatter(payload)
         if len(data) < 2:
