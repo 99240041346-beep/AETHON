@@ -67,10 +67,20 @@ def test_openai_environment_defaults(monkeypatch):
     assert router.provider.web_search is True
 
 
-def test_deterministic_provider_unknown_question_is_truthful():
+def test_deterministic_provider_unknown_question_is_natural():
     response = DeterministicProvider().generate("", user_text="Explain quantum computing")
-    assert "remote language model" in response
-    assert "quantum computing" not in response
+    assert "remote language model" not in response.lower()
+    assert "deployment" not in response.lower()
+    assert response
+
+
+def test_local_intelligence_self_description_and_telugu():
+    router = ModelRouter(provider=None)
+    # Explicit provider keeps this test independent of deployment credentials.
+    from aethon.model_router import LocalIntelligenceProvider
+    provider = LocalIntelligenceProvider()
+    assert "AETHON" in provider.generate("", user_text="tell about yourself")
+    assert "తెలుగులో" in provider.generate("", user_text="can you talk in telugu")
 
 
 def test_auto_provider_without_key_uses_local_intelligence(monkeypatch):
