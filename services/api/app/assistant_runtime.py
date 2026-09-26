@@ -96,9 +96,15 @@ class AssistantRuntime:
         for prefix in ("search web for ", "search the web for ", "web search "):
             if lowered.startswith(prefix):
                 return "web_search", {"query": text[len(prefix):].strip(), "limit": 5}
-        if lowered.startswith(("research ", "deep research ", "investigate ", "compare sources for ")):
+        if lowered.startswith(("research ", "deep research ", "investigate ", "compare sources for ",
+                                "check ", "look up ", "find out ", "verify ")):
+            # Explicit current/verification language goes through evidence-producing research.
             return "web_research", {"query": text, "limit": 5}
-        fresh_markers = ("latest ", "today ", "current ", "news ", "recent ", "look up ", "find online ", "research ")
+        fresh_markers = (
+            "latest ", "today ", "current ", "news ", "recent ", "look up ",
+            "find online ", "research ", "check ", "verify ", "what is the latest ",
+            "what's the latest ", "what is current ", "what's current "
+        )
         if any(marker in lowered for marker in fresh_markers) and len(text.split()) >= 3:
             return "web_search", {"query": text, "limit": 5}
         return None
