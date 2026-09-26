@@ -41,6 +41,7 @@ public final class AndroidCommandService extends Service {
     private volatile String deviceId;
     private volatile String deviceToken;
     private AndroidActionExecutor actionExecutor;
+    private AndroidDeviceControlPlane controlPlane;
 
     public static void start(Context context, String baseUrl, String deviceId, String deviceToken) {
         if (baseUrl == null || deviceId == null || deviceToken == null
@@ -62,6 +63,7 @@ public final class AndroidCommandService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         actionExecutor = new AndroidActionExecutor(this);
+        controlPlane = new AndroidDeviceControlPlane(actionExecutor);
         createChannel();
         startForeground(NOTIFICATION_ID, notification("Device command link starting"));
     }
@@ -85,15 +87,19 @@ public final class AndroidCommandService extends Service {
     private void pollOnce() {
         try {
             JSONObject command = getNext();
+            controlPlane.markTransportState(true);
             if (command == null) return;
             long now = System.currentTimeMillis() / 1000L;
             if (command.optDouble("expires_at", 0) <= now) return;
             String capability = command.optString("capability", "");
             JSONObject argumentsJson = command.optJSONObject("arguments");
             Map<String, Object> arguments = argumentsJson == null ? Collections.emptyMap() : JsonObjectArguments.toMap(argumentsJson);
-            AndroidActionExecutor.Result result = actionExecutor.execute(capability, arguments);
+            AndroidActionExecutor.Result result = controlPlane.execute(
+                    command.optString("command_id", ""), capability, arguments,
+                    (long) command.optDouble("expires_at", 0));
             postResult(command.optString("command_id", ""), result);
         } catch (Exception ignored) {
+            controlPlane.markTransportState(false);
             // Transport failures are retried on the next bounded polling interval.
             // No action is reported as successful unless its executor verified it.
         }
