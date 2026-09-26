@@ -6,7 +6,7 @@ from aethon.tools import ToolRegistry
 
 def test_tool_specs_expose_execution_contracts():
     specs = ToolRegistry().list()
-    assert {spec.name for spec in specs} == {'calculator', 'web_search', 'web_fetch', 'chart'}
+    assert {spec.name for spec in specs} == {'calculator', 'web_search', 'web_fetch', 'web_research', 'chart'}
     for spec in specs:
         assert isinstance(spec, ToolSpec)
         assert spec.input_schema['type'] == 'object'
