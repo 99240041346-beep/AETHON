@@ -65,6 +65,62 @@ class DeterministicProvider:
         return True
 
 
+class LocalIntelligenceProvider:
+    """Bounded offline intelligence used when no remote model is configured."""
+
+    name = "local-intelligence"
+
+    _knowledge = {
+        "btech": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India.",
+        "what is btech": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India.",
+        "what is ai": "Artificial intelligence is the field of building computer systems that can perform tasks such as understanding language, recognizing patterns, reasoning, and generating content.",
+        "artificial intelligence": "Artificial intelligence is the field of building computer systems that can perform tasks such as understanding language, recognizing patterns, reasoning, and generating content.",
+        "machine learning": "Machine learning is a branch of AI in which systems learn patterns from data to make predictions or decisions.",
+        "what is machine learning": "Machine learning is a branch of AI in which systems learn patterns from data to make predictions or decisions.",
+        "python": "Python is a high-level, general-purpose programming language widely used for web development, automation, data analysis, machine learning, and scripting.",
+        "what is python": "Python is a high-level, general-purpose programming language widely used for web development, automation, data analysis, machine learning, and scripting.",
+        "html": "HTML is the standard markup language used to structure content on web pages.",
+        "css": "CSS controls the presentation and layout of HTML documents.",
+        "javascript": "JavaScript is a programming language widely used to add interactive behavior to web pages and build applications.",
+        "api": "An API is a defined way for software components to communicate, commonly using HTTP requests and structured responses such as JSON.",
+        "what is api": "An API is a defined way for software components to communicate, commonly using HTTP requests and structured responses such as JSON.",
+        "json": "JSON is a lightweight text format commonly used to exchange structured data between applications.",
+        "git": "Git is a distributed version-control system that records changes as commits and supports branches and collaboration.",
+        "android": "Android is a mobile operating system and application platform. Android apps are commonly built with Kotlin or Java."
+    }
+
+    def generate(self, prompt: str, user_text: str | None = None) -> str:
+        text = (user_text or "").strip()
+        if not text:
+            return "How can I help you?"
+        normalized = " ".join(text.lower().strip().rstrip("?.!").split())
+        now = datetime.now(timezone.utc).astimezone()
+        if normalized in {"date", "today", "what is the date", "what's the date"}:
+            return f"Today is {now.strftime('%A, %d %B %Y')}."
+        if normalized in {"time", "what is the time", "what's the time", "current time", "what time is it"}:
+            return f"The current time is {now.strftime('%I:%M %p')}."
+        if normalized in {"hello", "hi", "hey", "hello aethon", "hi aethon", "hey aethon", "good morning", "good afternoon", "good evening"}:
+            return "Hello! I'm AETHON. How can I help you today?"
+        if normalized in {"thanks", "thank you", "thanks aethon", "thank you aethon"}:
+            return "You're welcome! I'm here whenever you need me."
+        if normalized in {"bye", "goodbye", "see you", "see you later"}:
+            return "Goodbye! I'll be here when you need me."
+        if normalized in {"how are you", "how are you aethon"}:
+            return "I'm running normally and ready to help. What would you like to do?"
+        if normalized in {"who are you", "what are you", "what is aethon"}:
+            return "I'm AETHON, your personal AI operating platform. I can work with conversations, calculations, research, files, charts, voice, Android capabilities, and connected tools."
+        if normalized in {"what can you do", "what can you do aethon", "help", "help me"}:
+            return "I can chat, calculate, research the web when enabled, work with files, create charts, use voice, and work with authorized Android and connected tools."
+        if normalized in self._knowledge:
+            return self._knowledge[normalized]
+        if normalized.startswith("define ") and normalized[7:] in self._knowledge:
+            return self._knowledge[normalized[7:]]
+        return "I don't have a remote language model configured on this deployment, so I can't reliably generate an unrestricted answer to that question yet. I can still handle supported local intelligence, calculations, charts, research, files, and connected tools."
+
+    def health(self) -> bool:
+        return True
+
+
 class OpenAIResponsesProvider:
     """OpenAI Responses API provider with bounded retries and optional web search."""
     name = "openai"
