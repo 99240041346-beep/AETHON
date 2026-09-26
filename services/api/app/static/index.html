@@ -46,10 +46,10 @@
 
       <footer class="composer-wrap">
         <div class="composer">
-          <input id="attachmentInput" type="file" hidden multiple accept=".txt,.md,.csv,.json,.xml,.pdf,.docx,.xlsx,.pptx,image/png,image/jpeg,image/webp,image/gif"><button class="attach-btn" id="attachBtn" type="button" title="Attach files">＋</button><textarea id="input" rows="1" maxlength="8000" placeholder="Message AETHON…"></textarea>
+          <input id="attachmentInput" type="file" hidden multiple accept=".txt,.md,.csv,.json,.xml,.pdf,.docx,.xlsx,.pptx,image/png,image/jpeg,image/webp,image/gif"><button class="attach-btn" id="attachBtn" type="button" title="Attach files">＋</button><button class="voice-btn" id="voiceBtn" type="button" title="Voice input" aria-label="Voice input">🎙</button><button class="voice-btn" id="speakBtn" type="button" title="Voice replies" aria-label="Voice replies">🔊</button><textarea id="input" rows="1" maxlength="8000" placeholder="Message AETHON…"></textarea>
           <button class="send" id="send" aria-label="Send">↑</button>
         </div>
-        <div id="attachmentList" class="attachment-list"></div><div class="composer-meta"><span>Enter to send · Shift+Enter for new line · Attach up to 5 files</span><span id="modelStatus">Deterministic runtime</span></div>
+        <div id="attachmentList" class="attachment-list"></div><div class="composer-meta"><span id="voiceStatus">Enter to send · Shift+Enter for new line · Attach up to 5 files</span><span id="modelStatus">Deterministic runtime</span></div>
       </footer>
     </main>
   </div>
