@@ -210,6 +210,18 @@ class AssistantRuntime:
                              error=result.error if not result.ok else None,
                              visualization=visualization)
 
+    @staticmethod
+    def _resolve_followup(text: str, history: list[dict[str, Any]]) -> str:
+        value = " ".join(text.strip().split())
+        lowered = value.casefold()
+        markers = ("what about ", "how about ", "and ", "also ", "what about", "tell me more about ", "that ", "it ", "this ")
+        if not lowered.startswith(markers):
+            return value
+        previous = next((str(row.get("content", "")).strip() for row in reversed(history) if row.get("role") == "user" and str(row.get("content", "")).strip()), "")
+        if not previous:
+            return value
+        return f"{previous} — follow-up: {value}"
+
     def run(self, *, owner_id: str, session_id: str | None, text: str,
             language: str = "te-IN", project_id: str | None = None,
             execute_tools: bool = True, require_approval: bool = False,
@@ -285,6 +297,8 @@ class AssistantRuntime:
         tool = self._tool_intent(intent)
         if tool is not None and execute_tools:
             tool_name, arguments = tool
+            if tool_name in {"web_search", "web_research"} and "query" in arguments:
+                arguments = {**arguments, "query": self._resolve_followup(str(arguments["query"]), history)}
             if tool_name == "data_analyze" and attachment_text:
                 lower_context = attachment_text.casefold()
                 data_format = "json" if ".json" in lower_context else "csv"
