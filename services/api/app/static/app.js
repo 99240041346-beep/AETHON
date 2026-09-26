@@ -266,6 +266,70 @@
     if (content) content.innerHTML = renderText(response || "");
   }
 
+  function renderVisualization(el, spec) {
+    if (!spec || !spec.chartType || !Array.isArray(spec.data)) return;
+    const host = document.createElement("div");
+    host.className = "chart-card";
+    const title = esc(spec.meta?.title || "Chart");
+    const description = esc(spec.meta?.description || "");
+    const type = spec.chartType;
+    const data = spec.data;
+    const width = 720, height = 330, left = 58, right = 20, top = 58, bottom = 48;
+    const values = type === "scatter"
+      ? data.flatMap((row) => [Number(row.x), Number(row.y)])
+      : data.map((row) => Number(row[spec.valueKey || spec.series?.[0]?.dataKey || "value"]));
+    const max = Math.max(...values, 1), min = Math.min(...values, 0);
+    const span = max - min || 1;
+    let body = "";
+    if (type === "pie") {
+      const total = data.reduce((sum, row) => sum + Math.max(0, Number(row[spec.valueKey || "value"]) || 0), 0) || 1;
+      let angle = -Math.PI / 2;
+      const cx = 250, cy = 190, radius = 105;
+      const slices = data.map((row, i) => {
+        const value = Math.max(0, Number(row[spec.valueKey || "value"]) || 0);
+        const next = angle + (value / total) * Math.PI * 2;
+        const large = next - angle > Math.PI ? 1 : 0;
+        const x1 = cx + radius * Math.cos(angle), y1 = cy + radius * Math.sin(angle);
+        const x2 = cx + radius * Math.cos(next), y2 = cy + radius * Math.sin(next);
+        const path = `M ${cx} ${cy} L ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2} Z`;
+        angle = next;
+        const label = esc(row[spec.nameKey || "category"]);
+        return `<path class="chart-slice" d="${path}"><title>${label}: ${value}</title></path>`;
+      }).join("");
+      const legend = data.map((row, i) => `<span class="chart-legend"><i></i>${esc(row[spec.nameKey || "category"])}: ${Number(row[spec.valueKey || "value"])}</span>`).join("");
+      body = `<svg viewBox="0 0 720 330" role="img" aria-label="${title}">${slices}<g transform="translate(430 85)">${legend}</g></svg>`;
+    } else if (type === "scatter") {
+      const points = data.map((row) => {
+        const x = left + ((Number(row.x) - Math.min(...data.map(d => Number(d.x)))) / (Math.max(...data.map(d => Number(d.x))) - Math.min(...data.map(d => Number(d.x)) || [1]) || 1)) * (width-left-right);
+        const y = height-bottom - ((Number(row.y)-Math.min(...data.map(d => Number(d.y)))) / (Math.max(...data.map(d => Number(d.y)))-Math.min(...data.map(d => Number(d.y))) || 1)) * (height-top-bottom);
+        return `<circle class="chart-point" cx="${x}" cy="${y}" r="5"><title>${esc(row.x)}: ${esc(row.y)}</title></circle>`;
+      }).join("");
+      body = `<svg viewBox="0 0 720 330" role="img" aria-label="${title}"><line class="chart-axis" x1="${left}" y1="${height-bottom}" x2="${width-right}" y2="${height-bottom}"/><line class="chart-axis" x1="${left}" y1="${top}" x2="${left}" y2="${height-bottom}"/>${points}</svg>`;
+    } else {
+      const key = spec.series?.[0]?.dataKey || "value";
+      const step = (width-left-right) / Math.max(data.length, 1);
+      const points = data.map((row, i) => {
+        const value = Number(row[key]) || 0;
+        const x = left + step * (i + 0.5);
+        const y = height-bottom - ((value-min) / span) * (height-top-bottom);
+        return {x, y, value, label: row[spec.xKey || "category"]};
+      });
+      if (type === "line") {
+        body += `<polyline class="chart-line" points="${points.map(p => `${p.x},${p.y}`).join(" ")}"/>`;
+        body += points.map(p => `<circle class="chart-point" cx="${p.x}" cy="${p.y}" r="4"><title>${esc(p.label)}: ${p.value}</title></circle>`).join("");
+      } else {
+        const barWidth = Math.min(54, step * 0.62);
+        body += points.map(p => `<rect class="chart-bar" x="${p.x-barWidth/2}" y="${p.y}" width="${barWidth}" height="${Math.max(1, height-bottom-p.y)} rx="5"><title>${esc(p.label)}: ${p.value}</title></rect>`).join("");
+      }
+      body += `<line class="chart-axis" x1="${left}" y1="${height-bottom}" x2="${width-right}" y2="${height-bottom}"/><line class="chart-axis" x1="${left}" y1="${top}" x2="${left}" y2="${height-bottom}"/>`;
+      body += points.map(p => `<text class="chart-label" x="${p.x}" y="${height-20}" text-anchor="middle">${esc(String(p.label).slice(0,14))}</text>`).join("");
+      body += `<text class="chart-value" x="${left-8}" y="${top+8}" text-anchor="end">${max}</text><text class="chart-value" x="${left-8}" y="${height-bottom}" text-anchor="end">${min}</text>`;
+      body = `<svg viewBox="0 0 720 330" role="img" aria-label="${title}">${body}</svg>`;
+    }
+    host.innerHTML = `<div class="chart-title">${title}</div><div class="chart-description">${description}</div>${body}`;
+    el.querySelector(".bubble")?.appendChild(host);
+  }
+
   async function send(text, regenerate = false) {
     text = (text || $("#input").value).trim();
     if (!text || state.busy) return;
@@ -340,6 +404,7 @@
           if (record.includes("event: completed")) {
             if (data.session_id) state.session = data.session_id;
             updateAssistant(assistant, data.response || data.error || "No response.");
+            if (data.visualization) renderVisualization(assistant, data.visualization);
             speakResponse(data.response || data.error || "");
             addMessageTools(assistant, text);
             if (data.requires_confirmation) assistant.querySelector(".bubble").insertAdjacentHTML(
