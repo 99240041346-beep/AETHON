@@ -23,7 +23,9 @@
   function authErrorMessage(error) {
     const raw = String(error?.message || error || "");
     if (raw.includes("Not authenticated") || raw.includes('"detail":"Not authenticated"')) {
-      return "AETHON requires an API token on this deployment. Open Settings and enter the Render AETHON_API_TOKEN.";
+      $("#token").value = state.token;
+      $("#settingsDialog").showModal();
+      return "Authentication is required. Enter the AETHON API token in Settings, save it, then send again.";
     }
     if (raw.includes("authentication is not configured")) {
       return "AETHON production authentication is not configured on the server.";
