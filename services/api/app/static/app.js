@@ -451,6 +451,23 @@
     }
   }
 
+  async function refreshModelStatus() {
+    const status = $("#modelStatus");
+    try {
+      const data = await api("/v1/model/health");
+      if (data.configured) {
+        status.textContent = "AI model · " + (data.model || data.provider || "connected");
+        status.title = data.web_search ? "Model connected · web search enabled" : "Model connected";
+      } else {
+        status.textContent = "Local intelligence · no remote model";
+        status.title = "AETHON is using its bounded local intelligence layer";
+      }
+    } catch (error) {
+      status.textContent = "Runtime status unavailable";
+      status.title = error.message || "Could not read model status";
+    }
+  }
+
   async function showCapabilities() {
     try {
       const data = await api("/v1/capabilities");
@@ -582,6 +599,7 @@
     $(".sidebar-bottom").insertBefore(exportButton, $("#docsBtn"));
 
     loadSessions();
+    refreshModelStatus();
   }
 
   window.addEventListener("error", (event) => {
