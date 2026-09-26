@@ -38,7 +38,7 @@ def test_astra_runtime_exposes_all_catalog_agents():
 
 
 def test_astra_runtime_rejects_uninstalled_capabilities_without_execution():
-    runtime = ASTRARuntime(tools=FakeTools({"web_search", "web_fetch", "web_research"}))
+    runtime = ASTRARuntime(tools=FakeTools(set()))
     result = runtime.run(agent_id="research", goal="research a topic", owner_id="owner")
     assert result.status.value == "failed"
     assert "capability adapters unavailable" in (result.error or "")
