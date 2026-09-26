@@ -101,11 +101,11 @@ class AssistantOrchestrator:
         intent = self.classify(text, context=context)
         telugu = language.lower().startswith("te")
         if intent.mode is AssistantMode.ACTION and intent.requires_confirmation:
-            message = "ఈ action చేయడానికి మీ confirmation అవసరం. కొనసాగించనా?" if telugu else "I need your confirmation before performing that action. Continue?"
+            message = "Harsha, ఈ action చేయడానికి మీ confirmation అవసరం. కొనసాగించనా?" if telugu else "Harsha, I need your confirmation before performing that action. Continue?"
         elif intent.mode is AssistantMode.ACTION:
-            message = "సరే, నేను ఆ action కోసం plan చేస్తున్నాను." if telugu else "Okay, I’m planning that action."
+            message = "సరే Harsha, నేను ఆ action కోసం plan చేస్తున్నాను." if telugu else "Okay Harsha, I’m planning that action."
         elif intent.mode is AssistantMode.TASK:
-            message = "సరే, నేను task ని plan చేసి verify చేస్తాను." if telugu else "Okay, I’ll plan the task and verify the result."
+            message = "సరే Harsha, నేను task ని plan చేసి verify చేస్తాను." if telugu else "Okay Harsha, I’ll plan the task and verify the result."
         else:
-            message = "చెప్పు, నేను వింటున్నాను." if telugu else "Tell me. I’m listening."
+            message = "చెప్పు Harsha, నేను వింటున్నాను." if telugu else "Tell me Harsha, I’m listening."
         return AssistantReply(text=message, intent=intent)
