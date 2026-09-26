@@ -9,7 +9,7 @@ import httpx
 
 class ModelProvider(Protocol):
     name: str
-    def generate(self, prompt: str) -> str: ...
+    def generate(self, prompt: str, user_text: str | None = None) -> str: ...
     def health(self) -> bool: ...
 
 
@@ -30,8 +30,8 @@ class DeterministicProvider:
                         return value[:800]
         return prompt.strip()[:800]
 
-    def generate(self, prompt: str) -> str:
-        user_text = self._user_text(prompt)
+    def generate(self, prompt: str, user_text: str | None = None) -> str:
+        user_text = (user_text or self._user_text(prompt)).strip()
         if not user_text:
             return "AETHON is ready."
         return "AETHON is running in deterministic mode. I received: " + user_text
@@ -65,7 +65,7 @@ class OpenAIResponsesProvider:
         text="\n".join(x for x in chunks if x.strip()).strip()
         if not text: raise RuntimeError("model provider returned no text output")
         return text
-    def generate(self,prompt:str)->str:
+    def generate(self,prompt:str, user_text: str | None = None)->str:
         payload={"model":self.model,"input":prompt}
         if self.web_search: payload["tools"]=[{"type":"web_search_preview"}]
         response=self._request(payload)
@@ -87,7 +87,7 @@ class OpenAICompatibleProvider:
                 last_error=exc
                 if attempt<self.retries: time.sleep(min(.25*(2**attempt),1.0))
         raise RuntimeError("model provider request failed after bounded retries") from last_error
-    def generate(self,prompt:str)->str:
+    def generate(self,prompt:str, user_text: str | None = None)->str:
         response=self._request(prompt)
         if response.status_code>=400: raise RuntimeError(f"model provider returned HTTP {response.status_code}")
         data=response.json()
@@ -114,5 +114,5 @@ class ModelRouter:
             if not all((base_url,model,api_key)): raise RuntimeError("AETHON_MODEL_BASE_URL, AETHON_MODEL_NAME and AETHON_MODEL_API_KEY are required")
             return OpenAICompatibleProvider(base_url,model,api_key)
         raise RuntimeError(f"unsupported model provider: {provider}")
-    def generate(self,prompt:str)->str: return self.provider.generate(prompt)
+    def generate(self,prompt:str, user_text: str | None = None)->str: return self.provider.generate(prompt, user_text=user_text)
     def health(self)->bool: return self.provider.health()
