@@ -24,6 +24,8 @@ def analyzer() -> IntentAnalyzer:
         ("create an AI video for my project", IntentType.VIDEO_GENERATION),
         ("design a social post for my project", IntentType.DESIGN_GENERATION),
         ("build a website for my farm", IntentType.WEBSITE_GENERATION),
+        ("create a web site like ChatGPT", IntentType.WEBSITE_GENERATION),
+        ("i want create a web site", IntentType.WEBSITE_GENERATION),
         ("write a report about the experiment", IntentType.DOCUMENT_GENERATION),
         ("schedule this every week", IntentType.AUTOMATION),
     ],
