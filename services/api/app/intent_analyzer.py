@@ -15,6 +15,9 @@ class IntentType(str, Enum):
     DATA_ANALYSIS = "DATA_ANALYSIS"
     DOCUMENT_GENERATION = "DOCUMENT_GENERATION"
     IMAGE_GENERATION = "IMAGE_GENERATION"
+    VIDEO_GENERATION = "VIDEO_GENERATION"
+    DESIGN_GENERATION = "DESIGN_GENERATION"
+    WEBSITE_GENERATION = "WEBSITE_GENERATION"
     AGENT_TASK = "AGENT_TASK"
     AUTOMATION = "AUTOMATION"
     MEMORY = "MEMORY"
@@ -37,6 +40,9 @@ class IntentAnalyzer:
     _DEVICE = re.compile(r"(?:open|launch|start)\s+(?:youtube|chrome|settings|app)|(?:tap|click|press|scroll|swipe)\b|screen|flashlight|volume|battery", re.I)
     _EXTERNAL = re.compile(r"(?:send|email|message|call|post|submit|purchase|buy|delete|invite|push)\b", re.I)
     _IMAGE = re.compile(r"(?:generate|create|make|draw|design)\s+(?:an?\s+)?(?:image|picture|poster|logo|illustration)", re.I)
+    _VIDEO = re.compile(r"(?:generate|create|make|produce|design)\s+(?:an?\s+)?(?:ai\s+)?(?:video|reel|short|animation)", re.I)
+    _DESIGN = re.compile(r"(?:create|make|design)\s+(?:a\s+)?(?:canva\s+)?(?:design|presentation|social post|poster)", re.I)
+    _WEBSITE = re.compile(r"(?:create|build|make|develop)\s+(?:a\s+)?(?:website|web app|web application|landing page)", re.I)
     _VISION = re.compile(r"(?:look at|analyze|describe|read|ocr|what is in)\s+(?:this|the)\s+(?:image|photo|screenshot|diagram)", re.I)
     _DATA = re.compile(r"(?:csv|xlsx?|dataset|dataframe|column|row|correlation|outlier|statistics|chart|plot|graph)", re.I)
     _FILE = re.compile(r"(?:pdf|docx?|xlsx?|csv|json|txt|md|zip|file|attachment)", re.I)
@@ -57,6 +63,9 @@ class IntentAnalyzer:
         if self._DEVICE.search(value): return IntentAnalysis(IntentType.DEVICE_ACTION, 0.96, ("device-language",), True)
         if self._EXTERNAL.search(value): return IntentAnalysis(IntentType.EXTERNAL_ACTION, 0.94, ("external-side-effect-language",), True)
         if self._IMAGE.search(value): return IntentAnalysis(IntentType.IMAGE_GENERATION, 0.93, ("image-generation-structure",))
+        if self._VIDEO.search(value): return IntentAnalysis(IntentType.VIDEO_GENERATION, 0.93, ("video-generation-structure",))
+        if self._DESIGN.search(value): return IntentAnalysis(IntentType.DESIGN_GENERATION, 0.92, ("design-generation-structure",))
+        if self._WEBSITE.search(value): return IntentAnalysis(IntentType.WEBSITE_GENERATION, 0.92, ("website-generation-structure",))
         if self._VISION.search(value): return IntentAnalysis(IntentType.VISION, 0.92, ("vision-language",))
         if self._DATA.search(value): return IntentAnalysis(IntentType.DATA_ANALYSIS, 0.93, ("data-structure",))
         if self._FILE.search(value) and re.search(r"\b(analy[sz]|extract|read|parse|summar)", value, re.I): return IntentAnalysis(IntentType.FILE_ANALYSIS, 0.92, ("file-analysis-structure",))
