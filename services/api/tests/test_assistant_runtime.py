@@ -209,3 +209,37 @@ def test_unsupported_local_question_automatically_uses_web_research():
     assert "source-backed fact" in result.response
     assert any(event.type == "research.fallback" for event in result.events)
     assert any(event.type == "tool.completed" and event.data["tool"] == "web_research" for event in result.events)
+
+
+def test_research_prefers_authoritative_and_diverse_sources():
+    from app.web_research import WebResearchAgent
+
+    class Search:
+        def __call__(self, query, limit):
+            return [
+                SimpleNamespace(title="Generic copy", url="https://blog.example.com/a", snippet="copy", source="blog"),
+                SimpleNamespace(title="UIDAI official", url="https://uidai.gov.in/aadhaar", snippet="official", source="uidai"),
+                SimpleNamespace(title="Duplicate", url="https://UIDAI.GOV.IN/aadhaar/", snippet="duplicate", source="uidai"),
+                SimpleNamespace(title="Other government", url="https://example.gov.in/info", snippet="gov", source="gov"),
+            ]
+
+    class Fetch:
+        def __call__(self, url):
+            return {"text": f"content for {url}"}
+
+    report = WebResearchAgent(Search(), Fetch(), max_sources=3).research("Aadhaar update")
+    assert report.sources[0].domain == "uidai.gov.in"
+    assert report.sources[0].authority_score >= 160
+    assert len({source.domain for source in report.sources}) == 3
+    assert len(report.sources) == 3
+
+
+def test_research_rejects_non_http_sources():
+    from app.web_research import WebResearchAgent
+
+    report = WebResearchAgent(
+        lambda query, limit: [SimpleNamespace(title="bad", url="javascript:alert(1)", snippet="x", source="bad")],
+        lambda url: {"text": "should not fetch"},
+    ).research("test")
+    assert report.sources == []
+    assert any("No usable public-web sources" in item for item in report.limitations)
