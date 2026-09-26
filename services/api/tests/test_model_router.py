@@ -5,7 +5,7 @@ from aethon.model_router import DeterministicProvider, ModelRouter, OpenAIRespon
 
 
 def test_deterministic_provider():
-    assert ModelRouter(DeterministicProvider()).generate("hello") == "Hello! How can I help you today?"
+    assert ModelRouter(DeterministicProvider()).generate("hello") == "Hello! I'm AETHON. How can I help you today?"
     assert "Today is" in ModelRouter(DeterministicProvider()).generate("date")
 
 
