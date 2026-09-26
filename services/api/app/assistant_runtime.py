@@ -244,6 +244,9 @@ class AssistantRuntime:
             except (ValueError, PermissionError):
                 pass
         self.repository.add_message(session_id, owner_id, "user", text, language)
+        effective_text = self._resolve_followup(text, history)
+        context_text = self._context(history)
+        intent = self.orchestrator.classify(effective_text, context=context_text)
         memory_command = self.memory.parse(text)
         if memory_command is not None:
             try:
@@ -280,7 +283,6 @@ class AssistantRuntime:
 
         attachment_text, attachment_names = attachment_context(attachment_ids or [], owner_id)
         self._emit(events, "context.loaded", request_id, event_callback, messages=len(history), attachments=attachment_names)
-        intent = self.orchestrator.classify(text)
         self._emit(events, "intent.classified", request_id, event_callback, mode=intent.mode.value, action=intent.action)
 
         if intent.mode is AssistantMode.ACTION:
