@@ -3,6 +3,9 @@ package ai.aethon.android;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
@@ -55,6 +58,8 @@ public final class AndroidActionExecutor {
             case AndroidCapabilityRegistry.MEDIA_PAUSE: return mediaKey(AndroidCapabilityRegistry.MEDIA_PAUSE, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE);
             case AndroidCapabilityRegistry.MEDIA_STOP: return mediaKey(AndroidCapabilityRegistry.MEDIA_STOP, android.view.KeyEvent.KEYCODE_MEDIA_STOP);
             case AndroidCapabilityRegistry.DEVICE_INFO: return deviceInfo();
+            case AndroidCapabilityRegistry.APP_LIST: return appList();
+            case AndroidCapabilityRegistry.NETWORK_STATUS: return networkStatus();
             default: return Result.rejected(capability, "Capability is registered but not executable on this Android client yet");
         }
     }
@@ -183,6 +188,40 @@ public final class AndroidActionExecutor {
         audio.dispatchMediaKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, keyCode));
         Map<String, Object> data = new HashMap<>(); data.put("key_code", keyCode);
         return Result.acceptedUnverified(capability, "Media key dispatched; playback requires observation verification", data);
+    }
+
+    private Result appList() {
+        PackageManager pm = context.getPackageManager();
+        java.util.List<android.content.pm.ApplicationInfo> installed = pm.getInstalledApplications(0);
+        java.util.List<Map<String, Object>> apps = new java.util.ArrayList<>();
+        int limit = Math.min(250, installed.size());
+        for (int i = 0; i < limit; i++) {
+            android.content.pm.ApplicationInfo info = installed.get(i);
+            Map<String, Object> item = new HashMap<>();
+            item.put("package_name", info.packageName);
+            CharSequence label = pm.getApplicationLabel(info);
+            item.put("label", label == null ? info.packageName : label.toString());
+            apps.add(item);
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("count", installed.size());
+        data.put("apps", apps);
+        data.put("truncated", installed.size() > limit);
+        return Result.success(AndroidCapabilityRegistry.APP_LIST, "Installed application inventory read", data);
+    }
+
+    private Result networkStatus() {
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return Result.rejected(AndroidCapabilityRegistry.NETWORK_STATUS, "Connectivity service unavailable");
+        Network active = cm.getActiveNetwork();
+        NetworkCapabilities caps = active == null ? null : cm.getNetworkCapabilities(active);
+        Map<String, Object> data = new HashMap<>();
+        data.put("connected", caps != null);
+        data.put("validated", caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
+        data.put("wifi", caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI));
+        data.put("cellular", caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR));
+        data.put("ethernet", caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET));
+        return Result.success(AndroidCapabilityRegistry.NETWORK_STATUS, "Network state read", data);
     }
 
     private Result deviceInfo() {
