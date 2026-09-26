@@ -4,6 +4,8 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from aethon.auth import current_owner, security
 from aethon.execution_safety_gate import ExecutionAuthorizationError, SafetyExecutionGate
@@ -47,6 +49,7 @@ app.include_router(assistant_router)
 app.include_router(assistant_runtime_router)
 app.include_router(language_router)
 app.include_router(android_command_transport_router)
+app.mount('/static', StaticFiles(directory=os.path.join(os.path.dirname(__file__), 'static')), name='static')
 
 
 def owner(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> str:
@@ -54,6 +57,10 @@ def owner(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(se
 
 @app.get('/')
 def root():
+    return FileResponse(os.path.join(os.path.dirname(__file__), 'static', 'index.html'))
+
+@app.get('/service-info')
+def service_info():
     return {
         'ok': True,
         'service': 'aethon-api',
@@ -64,6 +71,7 @@ def root():
         'assistant': '/v1/assistant/runtime/respond',
         'stream': '/v1/assistant/runtime/stream',
         'docs': '/docs',
+        'frontend': '/',
     }
 
 @app.get('/health')
