@@ -11,6 +11,7 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.media.AudioManager;
 import android.os.BatteryManager;
+import android.os.StatFs;
 import android.os.Build;
 
 import org.json.JSONObject;
@@ -143,7 +144,22 @@ public final class AndroidActionExecutor {
         if (bm == null) return Result.rejected(AndroidCapabilityRegistry.BATTERY_READ, "Battery service unavailable");
         int level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
         if (level < 0 || level > 100) return Result.rejected(AndroidCapabilityRegistry.BATTERY_READ, "Battery level unavailable");
-        Map<String, Object> data = new HashMap<>(); data.put("percent", level); return Result.success(AndroidCapabilityRegistry.BATTERY_READ, "Battery level read", data);
+        Map<String, Object> data = new HashMap<>();
+        data.put("percent", level);
+        data.put("charging", bm.isCharging());
+        data.put("temperature_c", batteryTemperature());
+        StatFs fs = new StatFs(android.os.Environment.getDataDirectory().getPath());
+        data.put("storage_available_bytes", fs.getAvailableBytes());
+        data.put("storage_total_bytes", fs.getTotalBytes());
+        return Result.success(AndroidCapabilityRegistry.BATTERY_READ, "Battery and device resource state read", data);
+    }
+
+    private float batteryTemperature() {
+        try {
+            android.content.Intent intent = context.registerReceiver(null, new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED));
+            if (intent == null) return -1f;
+            return intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) / 10f;
+        } catch (RuntimeException ex) { return -1f; }
     }
 
     private Result volumeRead() {
