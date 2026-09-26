@@ -15,8 +15,23 @@ class ModelProvider(Protocol):
 
 class DeterministicProvider:
     name = "deterministic"
-    def generate(self, prompt: str) -> str: return f"AETHON received: {prompt}"
-    def health(self) -> bool: return True
+
+    @staticmethod
+    def _user_text(prompt: str) -> str:
+        # Never expose the runtime system prompt, context, or attachment metadata.
+        marker = "\\nUser:"
+        if marker in prompt:
+            return prompt.rsplit(marker, 1)[-1].strip()[:800]
+        return prompt.strip()[:800]
+
+    def generate(self, prompt: str) -> str:
+        user_text = self._user_text(prompt)
+        if not user_text:
+            return "AETHON is ready."
+        return "AETHON is running in deterministic mode. I received: " + user_text
+
+    def health(self) -> bool:
+        return True
 
 
 class OpenAIResponsesProvider:
