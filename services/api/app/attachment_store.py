@@ -117,3 +117,24 @@ def attachment_context(ids: list[str], owner_id: str) -> tuple[str, list[str]]:
         else:
             parts.append(f"Attachment: {item.filename} ({item.media_type}, {item.size} bytes). Content is attached metadata only; no visual/document extraction is available yet.")
     return "\n\n".join(parts), names
+
+
+def retrieve_attachment_context(ids: list[str], owner_id: str, query: str, *,
+                               max_chunks: int = 6, chunk_chars: int = 1800) -> str:
+    """Bounded owner-scoped lexical retrieval over extracted attachment text."""
+    if max_chunks < 1 or chunk_chars < 200:
+        raise ValueError("invalid retrieval bounds")
+    terms = {token.casefold() for token in query.split() if len(token) > 2}
+    candidates: list[tuple[int, str, str]] = []
+    for attachment_id in ids[:5]:
+        item = get_attachment(attachment_id, owner_id)
+        if item is None or not item.text:
+            continue
+        chunks = [item.text[i:i + chunk_chars] for i in range(0, len(item.text), chunk_chars)]
+        for index, chunk in enumerate(chunks):
+            lowered = chunk.casefold()
+            score = sum(lowered.count(term) for term in terms)
+            if score:
+                candidates.append((score, item.filename, f"[{item.filename}#{index + 1}] {chunk}"))
+    candidates.sort(key=lambda row: (-row[0], row[1]))
+    return "\n\n".join(row[2] for row in candidates[:max_chunks])
