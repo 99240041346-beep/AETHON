@@ -1,66 +1,49 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#08090c">
-  <meta name="description" content="AETHON — Think. Create. Act.">
-  <title>AETHON — AI Operating Platform</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  <div class="app-shell">
-    <aside class="sidebar" id="sidebar">
-      <div class="brand"><div class="brand-mark">A</div><div><strong>AETHON</strong><span>Think. Create. Act.</span></div></div>
-      <button class="new-chat" id="newChat">＋ New conversation</button>
-      <div class="session-search"><input id="sessionSearch" placeholder="Search conversations…" autocomplete="off"></div>
-      <div class="side-label">Conversations</div>
-      <div class="sessions" id="sessions"></div>
-      <div class="sidebar-bottom">
-        <button class="side-action" id="capabilitiesBtn">◈ Capabilities</button>
-        <button class="side-action" id="settingsBtn">⚙ Settings</button>
-        <button class="side-action" id="docsBtn">⌘ API & Docs</button>
-      </div>
-    </aside>
-    <main class="main">
-      <header class="topbar">
-        <button class="icon-btn mobile-only" id="menuBtn" aria-label="Menu">☰</button>
-        <div class="top-title"><span class="status-dot"></span><span id="chatTitle">AETHON</span></div>
-        <div class="top-actions"><button class="icon-btn" id="renameBtn" title="Rename conversation">✎</button><button class="icon-btn" id="clearBtn" title="New conversation">＋</button></div>
-      </header>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#07090f"><meta name="description" content="ASTRA — Advanced Smart Task & Reasoning Assistant">
+<title>ASTRA — Think. Create. Research. Execute.</title><link rel="stylesheet" href="/static/styles.css">
+</head><body>
+<div class="shell">
+<aside class="sidebar" id="sidebar">
+  <div class="brand"><div class="logo">A</div><div><b>ASTRA</b><small>Think. Create. Research. Execute.</small></div></div>
+  <button class="new" id="newChat">＋ New conversation</button>
+  <nav class="nav">
+    <button class="navitem active" data-view="chat">◉ <span>Assistant</span></button>
+    <button class="navitem" data-view="agents">✦ <span>Agents</span></button>
+    <button class="navitem" data-view="factory">⚙ <span>AI Factory</span></button>
+    <button class="navitem" data-view="devices">▣ <span>Devices</span></button>
+    <button class="navitem" data-view="projects">◫ <span>Projects</span></button>
+    <button class="navitem" data-view="research">⌕ <span>Research</span></button>
+  </nav>
+  <div class="side-section"><label>Recent conversations</label><div id="sessions"></div></div>
+  <div class="sidebottom"><button class="sidebtn" id="capabilitiesBtn">◇ Capabilities</button><button class="sidebtn" id="settingsBtn">⚙ Settings</button><button class="sidebtn" id="docsBtn">⌘ API Docs</button></div>
+</aside>
+<main class="main">
+<header class="topbar"><button class="mobile" id="menuBtn">☰</button><div><span class="online"></span><strong id="viewTitle">ASTRA Assistant</strong></div><div class="topactions"><span id="modelStatus" class="model">Checking runtime…</span><button id="renameBtn">✎</button></div></header>
 
-      <section class="welcome" id="welcome">
-        <div class="hero-mark">A</div>
-        <h1>How can I help?</h1>
-        <p>A unified AI workspace for reasoning, research, creation and action.</p>
-        <div class="quick-grid">
-          <button data-prompt="Explain what you can do and which capabilities are currently available."><b>Explore AETHON</b><span>See what is available right now</span></button>
-          <button data-prompt="Search the web for the latest important technology news."><b>Research</b><span>Find and synthesize web information</span></button>
-          <button data-prompt="Calculate 12345 * 6789."><b>Calculate</b><span>Use a verified arithmetic tool</span></button>
-          <button data-prompt="Create a histogram: 10, 12, 12, 15, 18, 20, 21, 21, 25, 30."><b>Smart Chart</b><span>Turn data into a visual chart</span></button>
-          <button data-prompt="Help me plan a software project from idea to deployment."><b>Build</b><span>Plan a project step by step</span></button>
-        </div>
-      </section>
+<section class="view active" id="view-chat">
+  <div class="welcome" id="welcome"><div class="hero">A</div><h1>What should ASTRA do?</h1><p>Your AI workspace for reasoning, research, creation and authorized action.</p>
+  <div class="quick"><button data-prompt="What can you do?"><b>Explore ASTRA</b><span>See available capabilities</span></button><button data-prompt="Research the latest developments in AI agents."><b>Deep Research</b><span>Search and synthesize information</span></button><button data-prompt="Create a software project plan from idea to deployment."><b>Build a project</b><span>Plan tasks and execution</span></button><button data-prompt="Create a histogram: 10, 12, 12, 15, 18, 20, 21, 21, 25, 30."><b>Analyze data</b><span>Generate a verified chart</span></button></div></div>
+  <div class="messages" id="messages"></div><div class="typing" id="typing">● ● ● <span>ASTRA is working</span></div>
+  <div class="composerWrap"><div id="attachmentList" class="attachments"></div><div class="composer">
+    <input id="attachmentInput" type="file" hidden multiple><button id="attachBtn" title="Attach files">＋</button><button id="voiceBtn" title="Voice input">🎙</button><button id="speakBtn" title="Voice replies">🔊</button>
+    <textarea id="input" rows="1" maxlength="8000" placeholder="Message ASTRA…"></textarea><button id="send" class="send">↑</button>
+  </div><div class="meta"><span id="voiceStatus">Enter to send · Shift+Enter for new line</span><span>Files up to 5</span></div></div>
+</section>
 
-      <section class="messages" id="messages"></section>
-      <div class="typing" id="typing"><span></span><span></span><span></span><em>AETHON is working…</em></div>
+<section class="view" id="view-agents"><div class="page"><div class="pagehead"><div><span class="eyebrow">AUTONOMOUS WORK</span><h1>Agents</h1><p>Run bounded specialist agents and monitor their verified progress.</p></div><button class="primary" id="refreshAgents">Refresh</button></div><div id="agentList" class="cards"></div></div></section>
 
-      <footer class="composer-wrap">
-        <div class="composer">
-          <input id="attachmentInput" type="file" hidden multiple accept=".txt,.md,.csv,.json,.xml,.pdf,.docx,.xlsx,.pptx,image/png,image/jpeg,image/webp,image/gif"><button class="attach-btn" id="attachBtn" type="button" title="Attach files">＋</button><button class="voice-btn" id="voiceBtn" type="button" title="Voice input" aria-label="Voice input">🎙</button><button class="voice-btn" id="speakBtn" type="button" title="Voice replies" aria-label="Voice replies">🔊</button><textarea id="input" rows="1" maxlength="8000" placeholder="Message AETHON…"></textarea>
-          <button class="send" id="send" aria-label="Send">↑</button>
-        </div>
-        <div id="attachmentList" class="attachment-list"></div><div class="composer-meta"><span id="voiceStatus">Enter to send · Shift+Enter for new line · Attach up to 5 files</span><span id="modelStatus">Checking intelligence runtime…</span></div>
-      </footer>
-    </main>
-  </div>
+<section class="view" id="view-factory"><div class="page"><div class="pagehead"><div><span class="eyebrow">AI CREATES AI</span><h1>AI Factory</h1><p>Specify, generate, sandbox, evaluate, approve and deploy agents. Generated artifacts are never executed implicitly.</p></div></div>
+<form id="factoryForm" class="formcard"><div class="grid2"><label>Name<input name="name" required placeholder="Rain Alert Agent"></label><label>Model<input name="model" value="provider-default"></label></div><label>Goal<textarea name="goal" required placeholder="Monitor weather information and prepare heavy-rain alerts."></textarea></label><div class="grid2"><label>Capabilities<input name="capabilities" placeholder="research, alerts, scheduling"></label><label>Tools<input name="tools" placeholder="web_research, notifications"></label></div><label>Constraints<input name="constraints" placeholder="bounded output, confirmation for external actions"></label><button class="primary">Create AI agent</button></form><div id="factoryList" class="cards"></div></div></section>
 
-  <dialog id="capDialog"><div class="dialog-head"><h2>Capabilities</h2><button class="icon-btn" data-close>×</button></div><div id="capList" class="cap-list"></div></dialog>
-  <dialog id="settingsDialog"><div class="dialog-head"><h2>Settings</h2><button class="icon-btn" data-close>×</button></div>
-    <label>API token <input id="token" type="password" placeholder="Optional if the server does not require one"></label>
-    <p class="muted">The token is stored only in this browser. AETHON will send it as a Bearer credential when configured.</p><p class="muted">Backend documentation is available from the API & Docs button.</p>
-    <button class="primary" id="saveSettings">Save settings</button>
-  </dialog>
-  <script src="/static/app.js"></script>
-</body>
-</html>
+<section class="view" id="view-devices"><div class="page"><div class="pagehead"><div><span class="eyebrow">CONTROL HUB</span><h1>Devices</h1><p>ASTRA on Android is the primary control hub. Connected endpoints expose only authorized capabilities.</p></div><button class="primary" id="refreshDevices">Refresh</button></div><div class="deviceHero"><div><b>Android Control Hub</b><p>Use the Android ASTRA app to register and execute queued commands.</p></div><div class="badge">SECURE · BOUNDED</div></div><div id="deviceList" class="cards"></div></div></section>
+
+<section class="view" id="view-projects"><div class="page"><div class="pagehead"><div><span class="eyebrow">WORKSPACE</span><h1>Projects</h1><p>Keep instructions, context and long-running work organized.</p></div><button class="primary" id="newProject">＋ Project</button></div><div id="projectList" class="cards"></div></div></section>
+
+<section class="view" id="view-research"><div class="page"><div class="pagehead"><div><span class="eyebrow">KNOWLEDGE</span><h1>Research</h1><p>Use the assistant for web research, source comparison and cited synthesis.</p></div></div><div class="researchBox"><textarea id="researchQuery" placeholder="What do you want to research?"></textarea><button class="primary" id="runResearch">Research with ASTRA</button></div><div id="researchResult" class="researchResult"></div></div></section>
+</main></div>
+
+<dialog id="capDialog"><div class="dialogHead"><h2>ASTRA capabilities</h2><button data-close>×</button></div><div id="capList"></div></dialog>
+<dialog id="settingsDialog"><div class="dialogHead"><h2>Settings</h2><button data-close>×</button></div><label>API token<input id="token" type="password" placeholder="Optional"></label><p class="muted">Stored only in this browser and sent as a Bearer token when configured.</p><button class="primary" id="saveSettings">Save</button></dialog>
+<script src="/static/app.js"></script></body></html>
