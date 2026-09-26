@@ -19,3 +19,11 @@ def test_deterministic_provider_handles_escaped_newline_prompt():
     assert response.endswith("hello aethon")
     assert "System text" not in response
     assert "Context:" not in response
+
+
+def test_deterministic_provider_prefers_explicit_user_text():
+    prompt = "System instructions\\nContext: internal\\nUser: hello aethon"
+    response = DeterministicProvider().generate(prompt, user_text="Hello you Don")
+    assert response.endswith("Hello you Don")
+    assert "System instructions" not in response
+    assert "internal" not in response
