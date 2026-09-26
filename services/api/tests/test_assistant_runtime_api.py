@@ -151,6 +151,7 @@ def test_runtime_stream_payloads_are_valid_json_and_share_request_id(monkeypatch
     assert events[-1]["request_id"] == events[0]["request_id"]
 
 
-def test_runtime_request_rejects_unknown_fields(client):
-    response = client.post("/v1/assistant/runtime/respond", json={"text": "hello", "unexpected": True})
+def test_runtime_request_rejects_unknown_fields():
+    from fastapi.testclient import TestClient
+    response = TestClient(app).post("/v1/assistant/runtime/respond", json={"text": "hello", "unexpected": True})
     assert response.status_code == 422
