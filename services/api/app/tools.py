@@ -155,7 +155,8 @@ class WebResearchTool:
             return ToolResult(ok=True, output={
                 'query': report.query,
                 'sources': [
-                    {'title': item.title, 'url': item.url, 'snippet': item.snippet, 'source': item.source}
+                    {'title': item.title, 'url': item.url, 'snippet': item.snippet, 'source': item.source,
+                     'domain': item.domain, 'authority_score': item.authority_score}
                     for item in report.sources
                 ],
                 'evidence': report.evidence,
