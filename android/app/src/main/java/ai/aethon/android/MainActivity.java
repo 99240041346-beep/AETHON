@@ -35,6 +35,8 @@ import java.util.Set;
 public final class MainActivity extends Activity implements TextToSpeech.OnInitListener {
     private static final int REQUEST_RECORD_AUDIO = 7001;
     private static final String DEFAULT_CLOUD_URL = "https://aethon-personal-ai.onrender.com";
+    // Legacy endpoint retained as an explicit compatibility contract; new chat/voice traffic uses the unified runtime.
+    private static final String LEGACY_ASSISTANT_ENDPOINT = "/v1/assistant/respond";
     private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
     private TextView status;
     private EditText apiUrl;
