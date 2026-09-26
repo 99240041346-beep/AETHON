@@ -99,7 +99,12 @@ class AssistantRuntime:
         if lowered.startswith(("research ", "deep research ", "investigate ", "compare sources for ",
                                 "check ", "look up ", "find out ", "verify ")):
             # Explicit current/verification language goes through evidence-producing research.
-            return "web_research", {"query": text, "limit": 5}
+            query = text
+            for prefix in ("check ", "research ", "deep research ", "investigate ", "look up ", "find out ", "verify ", "compare sources for "):
+                if lowered.startswith(prefix):
+                    query = text[len(prefix):].strip() or text
+                    break
+            return "web_research", {"query": query, "limit": 5}
         fresh_markers = (
             "latest ", "today ", "current ", "news ", "recent ", "look up ",
             "find online ", "research ", "check ", "verify ", "what is the latest ",
