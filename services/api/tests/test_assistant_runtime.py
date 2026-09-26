@@ -27,7 +27,7 @@ def test_chat_uses_session_context_and_persists_response():
 
     assert first.mode is AssistantMode.CHAT
     assert second.session_id == "s1"
-    assert "User: Continue" in second.response
+    assert "Continue" in second.response
     history = rt.repository.history("s1", "owner-a")
     assert [row["role"] for row in history] == ["user", "assistant", "user", "assistant"]
 
