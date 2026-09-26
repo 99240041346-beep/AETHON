@@ -75,7 +75,6 @@ def test_deterministic_provider_unknown_question_is_natural():
 
 
 def test_local_intelligence_self_description_and_telugu():
-    router = ModelRouter(provider=None)
     # Explicit provider keeps this test independent of deployment credentials.
     from aethon.model_router import LocalIntelligenceProvider
     provider = LocalIntelligenceProvider()
