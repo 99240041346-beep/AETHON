@@ -42,7 +42,7 @@ class IntentAnalyzer:
     _IMAGE = re.compile(r"(?:generate|create|make|draw|design)\s+(?:an?\s+)?(?:image|picture|poster|logo|illustration)", re.I)
     _VIDEO = re.compile(r"(?:generate|create|make|produce|design)\s+(?:an?\s+)?(?:ai\s+)?(?:video|reel|short|animation)", re.I)
     _DESIGN = re.compile(r"(?:create|make|design)\s+(?:a\s+)?(?:canva\s+)?(?:design|presentation|social post|poster)", re.I)
-    _WEBSITE = re.compile(r"(?:create|build|make|develop)\s+(?:a\s+)?(?:website|web app|web application|landing page)", re.I)
+    _WEBSITE = re.compile(r"(?:create|build|make|develop|want\s+to\s+create|want\s+to\s+build|i\s+want\s+to\s+create|i\s+want\s+to\s+build)\s+(?:a\s+)?(?:web\s*site|web\s+app|web\s+application|landing\s+page)", re.I)
     _VISION = re.compile(r"(?:look at|analyze|describe|read|ocr|what is in)\s+(?:this|the)\s+(?:image|photo|screenshot|diagram)", re.I)
     _DATA = re.compile(r"(?:csv|xlsx?|dataset|dataframe|column|row|correlation|outlier|statistics|chart|plot|graph)", re.I)
     _FILE = re.compile(r"(?:pdf|docx?|xlsx?|csv|json|txt|md|zip|file|attachment)", re.I)
