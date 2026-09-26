@@ -50,7 +50,7 @@ public final class WakeWordService extends Service {
             public void onBeginningOfSpeech() {}
             public void onRmsChanged(float r) {}
             public void onBufferReceived(byte[] b) {}
-            public void onEndOfSpeech() { restart(); }
+            public void onEndOfSpeech() {}
             public void onError(int e) { restart(); }
             public void onPartialResults(Bundle b) {}
             public void onEvent(int e, Bundle b) {}
