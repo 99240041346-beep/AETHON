@@ -66,8 +66,10 @@ class IntentAnalyzer:
         if self._TASK.search(value): return IntentAnalysis(IntentType.TASK, 0.90, ("task-language",))
         if self._AUTOMATION.search(value): return IntentAnalysis(IntentType.AUTOMATION, 0.90, ("automation-language",))
         if self._AGENT.search(value): return IntentAnalysis(IntentType.AGENT_TASK, 0.89, ("agent-language",))
-        if context and re.search(r"\\b(?:same|that|this|previous|above|it|them|more)\\b", value, re.I):\n            return IntentAnalysis(IntentType.NORMAL_CHAT, 0.70, ("contextual-reference",), arguments={"needs_context": True})\n        if self._RESEARCH.search(value):
-            signal = "freshness-request" if re.search(r"\b(latest|current)\b", value, re.I) else "research-question-structure"
+        words=set(re.findall(r"[a-z]+", value.lower()))
+        if context and words.intersection({"same","that","this","previous","above","it","them","more"}): return IntentAnalysis(IntentType.NORMAL_CHAT, 0.70, ("contextual-reference",), arguments={"needs_context": True})
+        if self._RESEARCH.search(value):
+            signal = "freshness-request" if any(word in words for word in {"latest","current"}) else "research-question-structure"
             return IntentAnalysis(IntentType.RESEARCH, 0.95 if signal == "freshness-request" else 0.88, (signal,))
         if self._SEARCH.search(value) or re.search(r"https?://\S+", value): return IntentAnalysis(IntentType.SEARCH, 0.87, ("search-language",))
         if self._VOICE.search(value): return IntentAnalysis(IntentType.VOICE, 0.86, ("voice-language",))
