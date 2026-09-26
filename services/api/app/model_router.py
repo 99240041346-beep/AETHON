@@ -18,10 +18,16 @@ class DeterministicProvider:
 
     @staticmethod
     def _user_text(prompt: str) -> str:
-        # Never expose the runtime system prompt, context, or attachment metadata.
-        marker = "\\nUser:"
-        if marker in prompt:
-            return prompt.rsplit(marker, 1)[-1].strip()[:800]
+        # The runtime prompt may contain either real or escaped newline markers.
+        # Extract only the final user payload; never return system/context text.
+        candidates = [prompt]
+        candidates.extend(prompt.split("\\n"))
+        for marker in ("User:", "user:"):
+            for candidate in reversed(candidates):
+                if marker in candidate:
+                    value = candidate.rsplit(marker, 1)[-1].strip()
+                    if value:
+                        return value[:800]
         return prompt.strip()[:800]
 
     def generate(self, prompt: str) -> str:
@@ -32,7 +38,6 @@ class DeterministicProvider:
 
     def health(self) -> bool:
         return True
-
 
 class OpenAIResponsesProvider:
     """OpenAI Responses API provider with bounded retries and optional web search."""
