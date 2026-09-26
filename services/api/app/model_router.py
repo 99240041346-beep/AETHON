@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 import httpx
@@ -33,8 +34,20 @@ class DeterministicProvider:
     def generate(self, prompt: str, user_text: str | None = None) -> str:
         user_text = (user_text or self._user_text(prompt)).strip()
         if not user_text:
-            return "AETHON is ready."
-        return "AETHON is running in deterministic mode. I received: " + user_text
+            return "How can I help you?"
+
+        # Keep the fallback user-facing. Never expose runtime prompts or provider internals.
+        normalized = user_text.strip().lower().rstrip("?.!").strip()
+        now = datetime.now(timezone.utc).astimezone()
+        if normalized in {"date", "today", "what is the date", "what's the date", "what is today's date", "what's today's date"}:
+            return f"Today is {now.strftime('%A, %d %B %Y')}."
+        if normalized in {"time", "what is the time", "what's the time", "current time", "what time is it"}:
+            return f"The current time is {now.strftime('%I:%M %p')}."
+        if normalized in {"hello", "hi", "hey", "hello aethon", "hi aethon", "hey aethon"}:
+            return "Hello! How can I help you today?"
+        if normalized in {"who are you", "what are you"}:
+            return "I'm AETHON, your personal AI assistant. I can help with questions, calculations, research, files, charts, and connected tools when those capabilities are available."
+        return "I can help with that, but a full AI model is not configured on this AETHON deployment yet. Configure a supported model provider to get ChatGPT-style answers to arbitrary questions."
 
     def health(self) -> bool:
         return True
