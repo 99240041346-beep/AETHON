@@ -47,6 +47,7 @@ class CapabilityRegistry:
             Capability('CHAT', 'Unified conversational AI', 'assistant', available=True),
             Capability('WEB_SEARCH', 'Public web search', 'tool', available='web_search' in tools, integration='web_search'),
             Capability('WEB_FETCH', 'Secure public HTTP(S) page fetch', 'tool', available='web_fetch' in tools, integration='web_fetch'),
+            Capability('WEB_RESEARCH', 'Multi-source public-web research with evidence', 'tool', available='web_research' in tools, integration='web_research'),
             Capability('CALCULATOR', 'Safe arithmetic calculation', 'tool', available='calculator' in tools, integration='calculator'),
             Capability('CHART', 'Bar, line, pie, histogram and scatter visualizations', 'tool', available='chart' in tools, integration='chart'),
             Capability('MODEL_PROVIDER', 'Configurable model provider', 'assistant', available=((model_provider in {'auto', 'openai', 'openai-compatible'}) and bool(os.getenv('AETHON_MODEL_API_KEY'))), integration=model_provider),
