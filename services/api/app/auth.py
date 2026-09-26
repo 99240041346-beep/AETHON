@@ -18,11 +18,14 @@ def current_owner(credentials: HTTPAuthorizationCredentials | None) -> str:
     the local-dev owner. The token is compared using constant-time equality.
     """
     expected = os.getenv("AETHON_API_TOKEN")
+    environment = os.getenv("AETHON_ENV", "development").strip().lower()
     owner_id = os.getenv("AETHON_API_OWNER_ID", "local-dev").strip()
     if expected:
         if not credentials or credentials.scheme.lower() != "bearer" or not hmac.compare_digest(credentials.credentials, expected):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
         return owner_id or "local-dev"
+    if environment in {"production", "prod"}:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="authentication is not configured")
     return owner_id or "local-dev"
 
 
