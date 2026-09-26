@@ -4,6 +4,7 @@ from aethon.schemas import ToolResult, ToolSpec, RiskClass
 from aethon.web import WebFetcher
 from aethon.web_search import WebSearch
 from app.chart_tools import ChartTool
+from app.web_research import WebResearchAgent
 
 
 class CalculatorTool:
@@ -110,6 +111,49 @@ class WebFetchTool:
             return ToolResult(ok=False, error=f'web fetch failed: {exc}')
 
 
+
+class WebResearchTool:
+    spec = ToolSpec(
+        name='web_research',
+        description='Research a public-web question by searching sources, fetching pages, and assembling evidence.',
+        input_schema={
+            'type': 'object',
+            'properties': {'query': {'type': 'string', 'minLength': 3, 'maxLength': 2000}},
+            'required': ['query'],
+            'additionalProperties': False,
+        },
+        output_schema={'type': 'object'},
+        risk=RiskClass.LOW,
+        side_effects=False,
+        timeout_seconds=30,
+        max_retries=1,
+        authentication='owner',
+        audit_required=True,
+    )
+
+    def __init__(self, search=None, fetch=None):
+        searcher = search or WebSearch()
+        fetcher = fetch or WebFetcher()
+        self.agent = WebResearchAgent(
+            lambda query, limit: searcher.search(query, limit),
+            lambda url: fetcher.fetch(url),
+        )
+
+    def execute(self, query: str) -> ToolResult:
+        try:
+            report = self.agent.research(query)
+            return ToolResult(ok=True, output={
+                'query': report.query,
+                'sources': [
+                    {'title': item.title, 'url': item.url, 'snippet': item.snippet, 'source': item.source}
+                    for item in report.sources
+                ],
+                'evidence': report.evidence,
+                'limitations': report.limitations,
+            }, verified=bool(report.sources and report.evidence))
+        except Exception as exc:
+            return ToolResult(ok=False, error=f'web research failed: {exc}')
+
 class ChartToolAdapter:
     spec = ToolSpec(**ChartTool().spec)
 
@@ -126,6 +170,7 @@ class ToolRegistry:
             'calculator': CalculatorTool(),
             'web_search': WebSearchTool(web_search),
             'web_fetch': WebFetchTool(web_fetch),
+            'web_research': WebResearchTool(web_search, web_fetch),
             'chart': ChartToolAdapter(),
         }
 
