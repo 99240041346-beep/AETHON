@@ -43,55 +43,19 @@ class DeterministicProvider:
             return f"Today is {now.strftime('%A, %d %B %Y')}."
         if normalized in {"time", "what is the time", "what's the time", "current time", "what time is it"}:
             return f"The current time is {now.strftime('%I:%M %p')}."
-        if normalized in {"hello", "hi", "hey", "hello aethon", "hi aethon", "hey aethon"}:
-            return "Hello! How can I help you today?"
-        if normalized in {"who are you", "what are you"}:
-            return "I'm AETHON, your personal AI assistant. I can help with questions, calculations, research, files, charts, and connected tools when those capabilities are available."
-        return "I can help with that, but a full AI model is not configured on this AETHON deployment yet. Configure a supported model provider to get ChatGPT-style answers to arbitrary questions."
-
-    def health(self) -> bool:
-        return True
-
-class LocalIntelligenceProvider:
-    """Bounded, offline knowledge layer for common questions when no remote model is configured."""
-
-    name = "local-intelligence"
-
-    _knowledge = {
-        "btech": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India. Common specializations include Computer Science, Information Technology, Electronics, Mechanical, Civil, and Electrical Engineering.",
-        "what is btech": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India. Students study a chosen engineering specialization along with mathematics, engineering fundamentals, projects, and practical work.",
-        "artificial intelligence": "Artificial intelligence (AI) is the field of building computer systems that can perform tasks that normally require human intelligence, such as understanding language, recognizing patterns, reasoning, making predictions, and generating content.",
-        "what is ai": "Artificial intelligence (AI) is the field of building computer systems that can perform tasks such as understanding language, recognizing patterns, reasoning, making predictions, and generating content.",
-        "machine learning": "Machine learning is a branch of AI in which systems learn patterns from data and use those patterns to make predictions or decisions. Common approaches include supervised, unsupervised, and reinforcement learning.",
-        "what is machine learning": "Machine learning is a branch of AI in which systems learn patterns from data and use those patterns to make predictions or decisions instead of relying only on hand-written rules.",
-        "python": "Python is a high-level, general-purpose programming language known for readable syntax and a large ecosystem. It is widely used for web development, automation, data analysis, machine learning, scripting, and education.",
-        "what is python": "Python is a high-level, general-purpose programming language known for readable syntax and a large ecosystem. It is widely used for web development, automation, data analysis, machine learning, and scripting.",
-        "api": "An API, or Application Programming Interface, is a defined way for software components to communicate. A web API commonly uses HTTP requests and structured responses such as JSON.",
-        "what is api": "An API, or Application Programming Interface, is a defined way for software components to communicate. A web API commonly uses HTTP requests and structured responses such as JSON.",
-        "database": "A database is a system for storing and retrieving information. Relational databases such as PostgreSQL organize information into tables and support queries, constraints, transactions, and relationships.",
-        "what is database": "A database is a system for storing and retrieving information. Relational databases such as PostgreSQL organize information into tables and support queries, constraints, transactions, and relationships.",
-        "http": "HTTP is the protocol commonly used for communication between web clients and servers. Requests use methods such as GET, POST, PUT, PATCH, and DELETE, while responses include a status code and data.",
-        "git": "Git is a distributed version-control system. It records changes to files as commits and supports branches, merging, collaboration, and restoring earlier versions.",
-        "android": "Android is a mobile operating system and application platform. Android apps are commonly built with Kotlin or Java using Android Studio and the Android SDK."
-    }
-
-    @classmethod
-    def _answer(cls, user_text: str) -> str | None:
-        normalized = " ".join(user_text.lower().strip().rstrip("?.!").split())
-        for key, answer in cls._knowledge.items():
-            if normalized == key or normalized == "define " + key:
-                return answer
-        return None
-
-    def generate(self, prompt: str, user_text: str | None = None) -> str:
-        text = (user_text or "").strip()
-        if not text:
-            return "How can I help you?"
-        normalized = text.lower().strip().rstrip("?.!").strip()
-        if normalized in {"hello", "hi", "hey", "hello aethon", "hi aethon", "hey aethon"}:
+        greetings = {"hello", "hi", "hey", "hello aethon", "hi aethon", "hey aethon", "good morning", "good afternoon", "good evening"}
+        if normalized in greetings:
             return "Hello! I'm AETHON. How can I help you today?"
+        if normalized in {"thanks", "thank you", "thanks aethon", "thank you aethon"}:
+            return "You're welcome! I'm here whenever you need me."
+        if normalized in {"bye", "goodbye", "see you", "see you later"}:
+            return "Goodbye! I'll be here when you need me."
+        if normalized in {"how are you", "how are you aethon"}:
+            return "I'm running normally and ready to help. What would you like to do?"
         if normalized in {"who are you", "what are you", "what is aethon"}:
-            return "I'm AETHON, a personal AI operating platform. I can work with conversations, calculations, research, files, charts, voice, Android capabilities, and connected tools that are enabled for this deployment."
+            return "I'm AETHON, your personal AI operating platform. I can work with conversations, calculations, research, files, charts, voice, Android capabilities, and connected tools that are enabled for this deployment."
+        if normalized in {"what can you do", "what can you do aethon", "help", "help me"}:
+            return "I can chat, calculate, research the web when enabled, work with files, create charts, use voice, and work with authorized Android and connected tools. Ask me what you want to accomplish and I'll use the appropriate capability."
         answer = self._answer(text)
         if answer:
             return answer
