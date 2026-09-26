@@ -57,7 +57,6 @@ class WebSearchTool:
             'properties': {
                 'query': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
                 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10},
-                'deep': {'type': 'boolean'},
             },
             'required': ['query'],
             'additionalProperties': False,
@@ -125,6 +124,7 @@ class WebResearchTool:
             'properties': {
                 'query': {'type': 'string', 'minLength': 3, 'maxLength': 2000},
                 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10},
+                'deep': {'type': 'boolean'},
             },
             'required': ['query'],
             'additionalProperties': False,
