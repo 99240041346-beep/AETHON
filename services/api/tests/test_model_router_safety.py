@@ -12,3 +12,10 @@ def test_deterministic_provider_does_not_echo_runtime_prompt():
     assert "You are AETHON" not in response
     assert "Context:" not in response
     assert "What can you do?" in response
+
+def test_deterministic_provider_handles_escaped_newline_prompt():
+    prompt = "System text\\nContext: internal\\nUser: hello aethon"
+    response = DeterministicProvider().generate(prompt)
+    assert response.endswith("hello aethon")
+    assert "System text" not in response
+    assert "Context:" not in response
