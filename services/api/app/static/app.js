@@ -20,6 +20,17 @@
     return state.token ? { Authorization: "Bearer " + state.token } : {};
   }
 
+  function authErrorMessage(error) {
+    const raw = String(error?.message || error || "");
+    if (raw.includes("Not authenticated") || raw.includes('"detail":"Not authenticated"')) {
+      return "AETHON requires an API token on this deployment. Open Settings and enter the Render AETHON_API_TOKEN.";
+    }
+    if (raw.includes("authentication is not configured")) {
+      return "AETHON production authentication is not configured on the server.";
+    }
+    return raw;
+  }
+
   async function api(path, options = {}) {
     const opts = { ...options, headers: { ...(options.headers || {}), ...authHeaders() } };
     if (opts.body && !opts.headers["Content-Type"]) opts.headers["Content-Type"] = "application/json";
@@ -156,7 +167,7 @@
       } catch (error) {
         const chip = document.createElement("span");
         chip.className = "attachment-chip error";
-        chip.textContent = file.name + ": " + error.message;
+        chip.textContent = file.name + ": " + authErrorMessage(error);
         $("#attachmentList").appendChild(chip);
       }
     }
@@ -276,7 +287,7 @@
       if (error.name === "AbortError") {
         updateAssistant(assistant, "Generation stopped.");
       } else {
-        updateAssistant(assistant, "Something went wrong: " + error.message);
+        updateAssistant(assistant, authErrorMessage(error));
       }
       addMessageTools(assistant, text);
     } finally {
@@ -297,7 +308,7 @@
       ).join("");
       $("#capDialog").showModal();
     } catch (error) {
-      alert("Could not load capabilities: " + error.message);
+      alert(authErrorMessage(error));
     }
   }
 
@@ -366,7 +377,7 @@
         $("#chatTitle").textContent = title.trim();
         await loadSessions();
       } catch (error) {
-        alert(error.message);
+        alert(authErrorMessage(error));
       }
     };
 
