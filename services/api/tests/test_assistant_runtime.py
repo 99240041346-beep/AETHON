@@ -133,6 +133,36 @@ def test_local_intelligence_provider_handles_hello_aethon():
     assert provider.generate("", user_text="hello aethon") == "Hello! I'm AETHON. How can I help you today?"
 
 
+def test_check_requests_use_verified_web_research_directly():
+    class SearchProvider:
+        def search(self, query, limit):
+            return [SimpleNamespace(
+                title="UIDAI",
+                url="https://uidai.gov.in/",
+                snippet="Official Aadhaar information.",
+                source="uidai.gov.in",
+            )]
+
+    class FetchProvider:
+        def fetch(self, url):
+            return {"text": "Official Aadhaar information and update guidance."}
+
+    rt = AssistantRuntime(
+        repository=fresh_repo(),
+        model_router=ModelRouter(LocalIntelligenceProvider()),
+        tools=ToolRegistry(SearchProvider(), FetchProvider()),
+    )
+    result = rt.run(
+        owner_id="owner-check",
+        session_id="check-1",
+        text="check what is Aadhaar update",
+        language="en-IN",
+    )
+    assert result.verified is True
+    assert "UIDAI" in result.response
+    assert any(event.type == "tool.selected" and event.data["tool"] == "web_research" for event in result.events)
+
+
 def test_unsupported_local_question_automatically_uses_web_research():
     class SearchProvider:
         def search(self, query, limit):
