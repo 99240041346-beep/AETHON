@@ -172,9 +172,20 @@ class AssistantRuntime:
         return str(output)
 
     @staticmethod
-    def _needs_web_fallback(response: str, model_router: ModelRouter) -> bool:
+    def _needs_web_fallback(response: str, model_router: ModelRouter, user_text: str) -> bool:
+        """Use web fallback only for requests that explicitly need fresh/evidence-backed data."""
         provider = getattr(getattr(model_router, "provider", None), "name", "")
-        return provider == "local-intelligence" and response.startswith("I don't have a remote language model configured")
+        if provider != "local-intelligence":
+            return False
+        if not response.startswith("I don't have a remote language model configured"):
+            return False
+        lowered = user_text.casefold()
+        research_markers = (
+            "latest", "today", "current", "news", "recent", "research",
+            "look up", "find online", "verify", "check online", "what happened",
+            "source", "sources", "official website", "live data",
+        )
+        return any(marker in lowered for marker in research_markers)
 
     def _tool(self, request: ToolRequest, intent: AssistantIntent, session_id: str,
               request_id: str, events: list[RuntimeEvent], require_approval: bool,
@@ -345,7 +356,7 @@ class AssistantRuntime:
                            provider=result.provider, model=result.model, live=result.live)
             else:
                 response = self.model_router.generate(prompt, user_text=text)
-            if self._needs_web_fallback(response, self.model_router) and execute_tools and len(text.split()) >= 2:
+            if self._needs_web_fallback(response, self.model_router, text) and execute_tools and len(text.split()) >= 2:
                 self._emit(events, "research.fallback", request_id, event_callback, query=text)
                 research = self._tool(
                     ToolRequest(tool="web_research", arguments={"query": text}, request_id=UUID(request_id)),
