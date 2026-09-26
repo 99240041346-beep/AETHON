@@ -65,3 +65,16 @@ def test_openai_environment_defaults(monkeypatch):
     assert router.provider.model == "gpt-5.6-luna"
     assert router.provider.base_url == "https://api.openai.com/v1"
     assert router.provider.web_search is True
+
+
+def test_deterministic_provider_unknown_question_is_truthful():
+    response = DeterministicProvider().generate("", user_text="Explain quantum computing")
+    assert "remote language model" in response
+    assert "quantum computing" not in response
+
+
+def test_auto_provider_without_key_uses_local_intelligence(monkeypatch):
+    monkeypatch.setenv("AETHON_MODEL_PROVIDER", "auto")
+    monkeypatch.delenv("AETHON_MODEL_API_KEY", raising=False)
+    router = ModelRouter()
+    assert router.provider.name == "local-intelligence"
