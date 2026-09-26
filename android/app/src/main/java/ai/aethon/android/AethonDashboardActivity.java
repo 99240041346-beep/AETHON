@@ -23,7 +23,7 @@ import java.util.Collections;
 import java.util.Map;
 
 /**
- * Personal AETHON command center. Online AI uses the authenticated cloud API;
+ * Personal ASTRA command center. Online AI uses the authenticated cloud API;
  * bounded local controls continue to work without network access.
  */
 public final class AethonDashboardActivity extends Activity {
@@ -90,7 +90,7 @@ public final class AethonDashboardActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
 
-        TextView title = text("AETHON", 32);
+        TextView title = text("ASTRA", 32);
         title.setGravity(Gravity.CENTER);
         title.setTypeface(null, 1);
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
@@ -111,7 +111,7 @@ public final class AethonDashboardActivity extends Activity {
 
         LinearLayout workspace = cardLayout();
         workspace.addView(text("AI Workspace", 19));
-        workspace.addView(text("Ask AETHON to plan, write, explain, design or transform an idea.", 13));
+        workspace.addView(text("Ask ASTRA to plan, write, explain, design or transform an idea.", 13));
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
         Button code = action("⌘  Code");
@@ -183,11 +183,11 @@ public final class AethonDashboardActivity extends Activity {
         apiUrl = field("Cloud API URL");
         apiUrl.setText(DEFAULT_PUBLIC_API);
         chat.addView(apiUrl);
-        command = field("Tell AETHON what you want…");
+        command = field("Tell ASTRA what you want…");
         command.setSingleLine(false);
         command.setMinLines(4);
         chat.addView(command, new LinearLayout.LayoutParams(-1, dp(110)));
-        Button send = action("➤  Run with AETHON");
+        Button send = action("➤  Run with ASTRA");
         send.setOnClickListener(v -> send());
         chat.addView(send);
         result = text("Ready. Online requests use HTTPS; local controls above do not require the network.", 13);
@@ -221,7 +221,7 @@ public final class AethonDashboardActivity extends Activity {
     private void preset(String value) {
         command.setText(value);
         command.setSelection(command.length());
-        result.setText("Prompt prepared. Review it, then tap Run with AETHON.");
+        result.setText("Prompt prepared. Review it, then tap Run with ASTRA.");
     }
 
     private void localAction(String capability, Map<String, Object> arguments) {
@@ -237,7 +237,7 @@ public final class AethonDashboardActivity extends Activity {
             result.setText("Enter a cloud API URL and a request first.");
             return;
         }
-        result.setText("AETHON is thinking online…");
+        result.setText("ASTRA is thinking online…");
         mode.setText("ONLINE AI • HTTPS cloud connection");
         new Thread(() -> {
             HttpURLConnection c = null;
