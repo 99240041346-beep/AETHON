@@ -93,9 +93,16 @@ class AssistantRuntime:
             and all(char in allowed for char in normalized)
         ):
             return "calculator", {"expression": normalized}
-        for prefix in ("search web for ", "search the web for ", "web search "):
+        for prefix in ("search web for ", "search the web for ", "web search ", "find the official website of ", "find the official site of "):
             if lowered.startswith(prefix):
                 return "web_search", {"query": text[len(prefix):].strip(), "limit": 5}
+        if lowered.startswith(("compare ", "compare the ", "difference between ", "what is the difference between ")):
+            query = text
+            for prefix in ("compare the ", "compare ", "difference between ", "what is the difference between "):
+                if lowered.startswith(prefix):
+                    query = text[len(prefix):].strip() or text
+                    break
+            return "web_research", {"query": query, "limit": 5}
         if lowered.startswith(("research ", "deep research ", "investigate ", "compare sources for ",
                                 "check ", "look up ", "find out ", "verify ")):
             # Explicit current/verification language goes through evidence-producing research.
