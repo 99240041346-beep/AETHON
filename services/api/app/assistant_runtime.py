@@ -35,6 +35,7 @@ class RuntimeResult:
     action_authorized: bool = False
     requires_confirmation: bool = False
     error: str | None = None
+    visualization: dict[str, Any] | None = None
 
 
 class AssistantRuntime:
@@ -73,6 +74,8 @@ class AssistantRuntime:
         lowered = text.casefold()
         if lowered.startswith(("calculate ", "calc ")):
             return "calculator", {"expression": text.split(" ", 1)[1].strip()}
+        if any(marker in lowered for marker in ("bar chart", "line chart", "pie chart", "scatter plot", "scatter chart")):
+            return "chart", {"text": text}
         if lowered.endswith((" → calculator", " -> calculator", " => calculator")):
             expression = text.rsplit("→", 1)[0].rsplit("->", 1)[0].rsplit("=>", 1)[0].strip()
             if expression:
@@ -121,11 +124,17 @@ class AssistantRuntime:
         result = self.tools.execute(request)
         self._emit(events, "tool.completed", request_id, event_callback,
                    tool=spec.name, ok=result.ok, verified=result.verified)
-        response = str(result.output) if result.ok else f"I couldn't complete that tool request: {result.error or 'unknown error'}"
+        visualization = result.output if request.tool == "chart" and result.ok and isinstance(result.output, dict) else None
+        response = (
+            f"Created {visualization.get('chartType', 'chart')} chart: {visualization.get('meta', {}).get('title', 'Chart')}."
+            if visualization else
+            str(result.output) if result.ok else f"I couldn't complete that tool request: {result.error or 'unknown error'}"
+        )
         return RuntimeResult(request_id, session_id, intent.mode, intent, response, result, tuple(events),
                              verified=result.verified,
                              action_authorized=bool(spec.side_effects and result.ok),
-                             error=result.error if not result.ok else None)
+                             error=result.error if not result.ok else None,
+                             visualization=visualization)
 
     def run(self, *, owner_id: str, session_id: str | None, text: str,
             language: str = "te-IN", project_id: str | None = None,
