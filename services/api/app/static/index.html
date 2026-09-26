@@ -13,18 +13,20 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand"><div class="brand-mark">A</div><div><strong>AETHON</strong><span>Think. Create. Act.</span></div></div>
       <button class="new-chat" id="newChat">＋ New conversation</button>
+      <div class="session-search"><input id="sessionSearch" placeholder="Search conversations…" autocomplete="off"></div>
       <div class="side-label">Conversations</div>
       <div class="sessions" id="sessions"></div>
       <div class="sidebar-bottom">
         <button class="side-action" id="capabilitiesBtn">◈ Capabilities</button>
         <button class="side-action" id="settingsBtn">⚙ Settings</button>
+        <button class="side-action" id="docsBtn">⌘ API & Docs</button>
       </div>
     </aside>
     <main class="main">
       <header class="topbar">
         <button class="icon-btn mobile-only" id="menuBtn" aria-label="Menu">☰</button>
         <div class="top-title"><span class="status-dot"></span><span id="chatTitle">AETHON</span></div>
-        <div class="top-actions"><button class="icon-btn" id="clearBtn" title="New conversation">＋</button></div>
+        <div class="top-actions"><button class="icon-btn" id="renameBtn" title="Rename conversation">✎</button><button class="icon-btn" id="clearBtn" title="New conversation">＋</button></div>
       </header>
 
       <section class="welcome" id="welcome">
@@ -55,7 +57,7 @@
   <dialog id="capDialog"><div class="dialog-head"><h2>Capabilities</h2><button class="icon-btn" data-close>×</button></div><div id="capList" class="cap-list"></div></dialog>
   <dialog id="settingsDialog"><div class="dialog-head"><h2>Settings</h2><button class="icon-btn" data-close>×</button></div>
     <label>API token <input id="token" type="password" placeholder="Optional if the server does not require one"></label>
-    <p class="muted">The token is stored only in this browser. AETHON will send it as a Bearer credential when configured.</p>
+    <p class="muted">The token is stored only in this browser. AETHON will send it as a Bearer credential when configured.</p><p class="muted">Backend documentation is available from the API & Docs button.</p>
     <button class="primary" id="saveSettings">Save settings</button>
   </dialog>
   <script src="/static/app.js"></script>
