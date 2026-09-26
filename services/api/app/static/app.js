@@ -9,13 +9,87 @@
     token: localStorage.getItem("aethon_token") || "",
     controller: null,
     lastPrompt: "",
-    attachments: []
+    attachments: [],
+    recognition: null,
+    listening: false,
+    voiceReplies: false,
+    voiceSupported: false
   };
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
     "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
   }[ch]));
 
+  function initVoice() {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    state.voiceSupported = !!Recognition;
+    const mic = $("#voiceBtn");
+    const speaker = $("#speakBtn");
+    if (!state.voiceSupported) {
+      mic.title = "Speech recognition is not supported by this browser";
+      mic.disabled = true;
+      mic.style.opacity = ".4";
+    } else {
+      const recognition = new Recognition();
+      recognition.lang = navigator.language || "en-IN";
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      recognition.maxAlternatives = 1;
+      recognition.onstart = () => {
+        state.listening = true;
+        mic.classList.add("listening");
+        $("#voiceStatus").textContent = "Listening… speak now";
+        $("#voiceStatus").classList.add("voice-status");
+      };
+      recognition.onresult = (event) => {
+        let finalText = "";
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const text = event.results[i][0]?.transcript || "";
+          if (event.results[i].isFinal) finalText += text;
+          else interim += text;
+        }
+        if (interim) $("#input").value = interim;
+        if (finalText.trim()) {
+          $("#input").value = finalText.trim();
+          $("#input").dispatchEvent(new Event("input"));
+          send(finalText.trim());
+        }
+      };
+      recognition.onerror = (event) => {
+        $("#voiceStatus").textContent = event.error === "not-allowed" ? "Microphone permission was denied." : "Voice input error: " + event.error;
+      };
+      recognition.onend = () => {
+        state.listening = false;
+        mic.classList.remove("listening");
+        $("#voiceStatus").textContent = "Enter to send · Shift+Enter for new line · Attach up to 5 files";
+        $("#voiceStatus").classList.remove("voice-status");
+      };
+      state.recognition = recognition;
+      mic.onclick = () => {
+        if (state.busy) return;
+        if (state.listening) recognition.stop();
+        else { try { recognition.start(); } catch {} }
+      };
+    }
+    speaker.onclick = () => {
+      state.voiceReplies = !state.voiceReplies;
+      speaker.classList.toggle("active", state.voiceReplies);
+      speaker.title = state.voiceReplies ? "Voice replies on" : "Voice replies off";
+      if (!state.voiceReplies) window.speechSynthesis?.cancel();
+      $("#voiceStatus").textContent = state.voiceReplies ? "Voice replies on" : "Enter to send · Shift+Enter for new line · Attach up to 5 files";
+    };
+  }
+
+  function speakResponse(text) {
+    if (!state.voiceReplies || !("speechSynthesis" in window) || !text) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text.replace(/[*_#]/g, ""));
+    utterance.lang = navigator.language || "en-IN";
+    utterance.rate = 0.95;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+  }
   function authHeaders() {
     return state.token ? { Authorization: "Bearer " + state.token } : {};
   }
@@ -266,6 +340,7 @@
           if (record.includes("event: completed")) {
             if (data.session_id) state.session = data.session_id;
             updateAssistant(assistant, data.response || data.error || "No response.");
+            speakResponse(data.response || data.error || "");
             addMessageTools(assistant, text);
             if (data.requires_confirmation) assistant.querySelector(".bubble").insertAdjacentHTML(
               "beforeend", '<div class="event">⚠ Approval required before this action can execute.</div>'
@@ -334,6 +409,7 @@
   }
 
   function bind() {
+    initVoice();
     $("#newChat").onclick = newChat;
     $("#clearBtn").onclick = newChat;
     $("#send").onclick = () => state.busy ? state.controller?.abort() : send();
