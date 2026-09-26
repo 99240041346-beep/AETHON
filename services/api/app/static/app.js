@@ -4,9 +4,7 @@ const $all=s=>Array.from(document.querySelectorAll(s));
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function auth(){return state.token?{"Authorization":"Bearer "+state.token}:{}}
 async function api(path,opt={}){opt.headers={...(opt.headers||{}),...auth(),"Content-Type":"application/json"};const r=await fetch(path,opt);if(!r.ok)throw new Error((await r.text()).slice(0,500)||r.statusText);return r.json()}
-function renderText(text){let x=esc(text);x=x.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g,(_,c)=>"<pre><code>"+c+"</code></pre>");x=x.replace(/\*\*(.*?)\*\*/g,"<strong>$1</strong>").replace(/\`([^\`]+)\`/g,"<code>$1</code>");x=x.replace(/^[-*] (.*)$/gm,"• $1");return x.split(/
-{2,}/).map(p=>"<p>"+p.replace(/
-/g,"<br>")+"</p>").join("")}
+function renderText(text){let x=esc(text);x=x.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g,(_,c)=>"<pre><code>"+c+"</code></pre>");x=x.replace(/\*\*(.*?)\*\*/g,"<strong>$1</strong>").replace(/\`([^\`]+)\`/g,"<code>$1</code>");x=x.replace(/^[-*] (.*)$/gm,"• $1");return x.split(/\\n{2,}/).map(p=>"<p>"+p.replace(/\\n/g,"<br>")+"</p>").join("")}
 function addMessage(role,text,events=[]){const box=$("#messages"),el=document.createElement("article");el.className="message "+role;el.innerHTML='<div class="avatar">'+(role==="user"?"YOU":"A")+'</div><div class="bubble"><div class="message-name">'+(role==="user"?"You":"AETHON")+'</div><div class="content">'+renderText(text)+'</div>'+events.map(e=>'<div class="event">• '+esc(e)+'</div>').join("")+"</div>";box.appendChild(el);box.scrollTop=box.scrollHeight;return el}
 function setBusy(v){state.busy=v;$("#send").disabled=false;$("#send").textContent=v?"■":"↑";$("#send").title=v?"Stop generation":"Send";$("#typing").classList.toggle("on",v)}
 function showWelcome(v){$("#welcome").style.display=v?"block":"none";$("#messages").style.display=v?"none":"block"}
