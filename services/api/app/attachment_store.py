@@ -45,6 +45,34 @@ def _clean_text(raw: bytes) -> str:
         text = text[:MAX_TEXT_CHARS] + "\n[attachment text truncated]"
     return text
 
+def _extract_document(raw: bytes, media_type: str) -> str | None:
+    try:
+        if media_type == "application/pdf":
+            from pypdf import PdfReader
+            import io
+            pages = PdfReader(io.BytesIO(raw)).pages
+            return "\n\n".join((page.extract_text() or "") for page in pages)[:MAX_TEXT_CHARS]
+        if media_type.endswith("wordprocessingml.document"):
+            from docx import Document
+            import io
+            doc = Document(io.BytesIO(raw))
+            return "\n".join(p.text for p in doc.paragraphs)[:MAX_TEXT_CHARS]
+        if media_type.endswith("spreadsheetml.sheet"):
+            from openpyxl import load_workbook
+            import io
+            wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+            rows = []
+            for ws in wb.worksheets:
+                rows.append(f"[Sheet: {ws.title}]")
+                for row in ws.iter_rows(values_only=True):
+                    rows.append("\t".join("" if value is None else str(value) for value in row))
+                    if sum(len(x) for x in rows) >= MAX_TEXT_CHARS:
+                        break
+            return "\n".join(rows)[:MAX_TEXT_CHARS]
+    except Exception:
+        return None
+    return None
+
 def create_attachment(*, owner_id: str, filename: str, media_type: str, raw: bytes) -> Attachment:
     if media_type not in _ALLOWED:
         raise ValueError("unsupported attachment type")
@@ -54,9 +82,14 @@ def create_attachment(*, owner_id: str, filename: str, media_type: str, raw: byt
     if not safe_name or len(safe_name) > 180:
         raise ValueError("invalid attachment filename")
     kind = _ALLOWED[media_type]
-    text = _clean_text(raw) if kind == "text" else None
+    if kind == "binary" and media_type in {"application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}:
+        extracted = _extract_document(raw, media_type)
+        kind = "document"
+    else:
+        extracted = None
+    text = _clean_text(raw) if kind == "text" else _extract_document(raw, media_type)
     item = Attachment(str(uuid4()), owner_id, safe_name, media_type, len(raw),
-                      hashlib.sha256(raw).hexdigest(), kind, text)
+                      hashlib.sha256(raw).hexdigest(), kind, text or extracted)
     with _lock:
         _store[item.attachment_id] = item
         if len(_store) > 500:
