@@ -27,6 +27,9 @@ public final class AndroidCapabilityRegistry {
     public static final String FLASHLIGHT_ON = "FLASHLIGHT_ON";
     public static final String FLASHLIGHT_OFF = "FLASHLIGHT_OFF";
     public static final String SCREEN_CAPTURE = "SCREEN_CAPTURE";
+    public static final String GLOBAL_HOME = "GLOBAL_HOME";
+    public static final String GLOBAL_RECENTS = "GLOBAL_RECENTS";
+    public static final String GLOBAL_NOTIFICATIONS = "GLOBAL_NOTIFICATIONS";
 
     private static final Set<String> ALLOWED;
     static {
@@ -35,7 +38,7 @@ public final class AndroidCapabilityRegistry {
                 SCREEN_READ, SCREEN_CLICK, SCREEN_SCROLL, SCREEN_TEXT, SCREEN_BACK,
                 APP_LIST, DEVICE_INFO, NETWORK_STATUS, BATTERY_READ, VOLUME_READ,
                 OPEN_APP, MEDIA_PLAY, MEDIA_PAUSE, MEDIA_STOP, VOLUME_SET,
-                FLASHLIGHT_ON, FLASHLIGHT_OFF, SCREEN_CAPTURE);
+                FLASHLIGHT_ON, FLASHLIGHT_OFF, SCREEN_CAPTURE, GLOBAL_HOME, GLOBAL_RECENTS, GLOBAL_NOTIFICATIONS);
         ALLOWED = Collections.unmodifiableSet(values);
     }
 
