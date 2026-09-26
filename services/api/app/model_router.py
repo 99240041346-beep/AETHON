@@ -66,7 +66,10 @@ class OpenAIResponsesProvider:
         if not text: raise RuntimeError("model provider returned no text output")
         return text
     def generate(self,prompt:str, user_text: str | None = None)->str:
-        payload={"model":self.model,"input":prompt}
+        payload={"model":self.model,"input":[
+            {"role":"developer","content":[{"type":"input_text","text":prompt}]},
+            {"role":"user","content":[{"type":"input_text","text":user_text or prompt}]},
+        ]}
         if self.web_search: payload["tools"]=[{"type":"web_search_preview"}]
         response=self._request(payload)
         if response.status_code>=400: raise RuntimeError(f"model provider returned HTTP {response.status_code}")
@@ -82,7 +85,7 @@ class OpenAICompatibleProvider:
     def _request(self,prompt:str)->httpx.Response:
         last_error:Exception|None=None
         for attempt in range(self.retries+1):
-            try:return httpx.post(f"{self.base_url}/chat/completions",headers={"Authorization":f"Bearer {self.api_key}"},json={"model":self.model,"messages":[{"role":"user","content":prompt}]},timeout=self.timeout)
+            try:return httpx.post(f"{self.base_url}/chat/completions",headers={"Authorization":f"Bearer {self.api_key}","Content-Type":"application/json"},json={"model":self.model,"messages":[{"role":"system","content":"You are AETHON, a bounded personal AI assistant. Never claim an action or tool result unless verified."},{"role":"user","content":prompt}],},timeout=self.timeout)
             except (httpx.TimeoutException,httpx.NetworkError) as exc:
                 last_error=exc
                 if attempt<self.retries: time.sleep(min(.25*(2**attempt),1.0))
@@ -102,7 +105,10 @@ class ModelRouter:
     def __init__(self,provider:ModelProvider|None=None): self.provider=provider or self._from_environment()
     @staticmethod
     def _from_environment()->ModelProvider:
-        provider=os.getenv("AETHON_MODEL_PROVIDER","deterministic").lower()
+        provider=os.getenv("AETHON_MODEL_PROVIDER","auto").lower()
+        if provider=="auto":
+            api_key=os.getenv("AETHON_MODEL_API_KEY","").strip()
+            provider = "openai" if api_key else "deterministic"
         if provider=="deterministic": return DeterministicProvider()
         if provider=="openai":
             base_url=os.getenv("AETHON_MODEL_BASE_URL","https://api.openai.com/v1");model=os.getenv("AETHON_MODEL_NAME","gpt-5.6-luna");api_key=os.getenv("AETHON_MODEL_API_KEY","")
