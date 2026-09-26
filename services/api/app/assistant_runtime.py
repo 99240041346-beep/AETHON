@@ -78,7 +78,7 @@ class AssistantRuntime:
             if expression:
                 return "calculator", {"expression": expression}
         import re
-        if re.fullmatch(r"[0-9\\s+\\-*/%.()]+", text):
+        if re.fullmatch(r"[0-9\s+\-*/%.()]+", text):
             return "calculator", {"expression": text}
         for prefix in ("search web for ", "search the web for ", "web search "):
             if lowered.startswith(prefix):
