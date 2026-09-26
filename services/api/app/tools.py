@@ -6,6 +6,8 @@ from aethon.web_search import WebSearch
 from app.chart_tools import ChartTool
 from app.web_research import WebResearchAgent
 from app.data_tool import DataAnalysisTool
+from app.research_loop import AutonomousResearchLoop
+from app.research_planner import AutonomousResearchPlanner
 
 
 class CalculatorTool:
@@ -55,6 +57,7 @@ class WebSearchTool:
             'properties': {
                 'query': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
                 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10},
+                'deep': {'type': 'boolean'},
             },
             'required': ['query'],
             'additionalProperties': False,
@@ -143,9 +146,34 @@ class WebResearchTool:
             lambda url: fetcher.fetch(url),
         )
 
-    def execute(self, query: str, limit: int = 5) -> ToolResult:
+    def execute(self, query: str, limit: int = 5, deep: bool = False) -> ToolResult:
         try:
             bounded_limit = max(1, min(int(limit), 10))
+            if deep:
+                loop = AutonomousResearchLoop(
+                    AutonomousResearchPlanner(max_questions=5, max_rounds=3, sources_per_round=bounded_limit),
+                    self.agent,
+                )
+                result = loop.run(query, max_questions=5, max_rounds=3)
+                reports = result.rounds
+                sources = []
+                evidence = []
+                limitations = list(result.unresolved_gaps)
+                for report in reports:
+                    sources.extend(report.sources)
+                    evidence.extend(report.evidence)
+                    limitations.extend(report.limitations)
+                return ToolResult(ok=True, output={
+                    'query': query,
+                    'mode': 'deep',
+                    'sources': [
+                        {'title': item.title, 'url': item.url, 'snippet': item.snippet, 'source': item.source,
+                         'domain': item.domain, 'authority_score': item.authority_score}
+                        for item in sources[:bounded_limit]
+                    ],
+                    'evidence': evidence[:bounded_limit * 2],
+                    'limitations': list(dict.fromkeys(limitations))[:10],
+                }, verified=bool(sources and evidence))
             agent = WebResearchAgent(
                 self.agent.search,
                 self.agent.fetch,
