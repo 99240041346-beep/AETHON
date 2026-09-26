@@ -52,9 +52,23 @@ app.include_router(android_command_transport_router)
 def owner(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> str:
     return current_owner(credentials)
 
+@app.get('/')
+def root():
+    return {
+        'ok': True,
+        'service': 'aethon-api',
+        'version': app.version,
+        'health': '/health',
+        'readiness': '/ready',
+        'capabilities': '/v1/capabilities',
+        'assistant': '/v1/assistant/runtime/respond',
+        'stream': '/v1/assistant/runtime/stream',
+        'docs': '/docs',
+    }
+
 @app.get('/health')
 def health():
-    return {'ok': True, 'service': 'aethon-api'}
+    return {'ok': True, 'service': 'aethon-api', 'version': app.version}
 
 @app.get('/ready')
 def ready():
