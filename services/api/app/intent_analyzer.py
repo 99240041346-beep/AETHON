@@ -21,7 +21,7 @@ class IntentType(str, Enum):
     PROJECT = "PROJECT"
     TASK = "TASK"
     EXTERNAL_ACTION = "EXTERNAL_ACTION"
-    DEVICE_ACTION = "DEVICE_ACTION
+    DEVICE_ACTION = "DEVICE_ACTION"
 
 @dataclass(frozen=True)
 class IntentAnalysis:
