@@ -296,7 +296,7 @@
         const label = esc(row[spec.nameKey || "category"]);
         return `<path class="chart-slice" d="${path}"><title>${label}: ${value}</title></path>`;
       }).join("");
-      const legend = data.map((row, i) => `<span class="chart-legend"><i></i>${esc(row[spec.nameKey || "category"])}: ${Number(row[spec.valueKey || "value"])}</span>`).join("");
+      const legend = data.map((row, i) => `<text class="chart-legend-text" x="0" y="${i * 22 + 16}">${esc(row[spec.nameKey || "category"])}: ${Number(row[spec.valueKey || "value"])}</text>`).join("");
       body = `<svg viewBox="0 0 720 330" role="img" aria-label="${title}">${slices}<g transform="translate(430 85)">${legend}</g></svg>`;
     } else if (type === "scatter") {
       const points = data.map((row) => {
