@@ -71,5 +71,4 @@ class IntentAnalyzer:
             return IntentAnalysis(IntentType.RESEARCH, 0.95 if signal == "freshness-request" else 0.88, (signal,))
         if self._SEARCH.search(value) or re.search(r"https?://\S+", value): return IntentAnalysis(IntentType.SEARCH, 0.87, ("search-language",))
         if self._VOICE.search(value): return IntentAnalysis(IntentType.VOICE, 0.86, ("voice-language",))
-        if context and re.search(r"\b(?:same|that|this|previous|above|it|them|more)\b", value, re.I): return IntentAnalysis(IntentType.NORMAL_CHAT, 0.70, ("contextual-reference",), arguments={"needs_context": True})
         return IntentAnalysis(IntentType.NORMAL_CHAT, 0.60, ("default-safe-chat",))
