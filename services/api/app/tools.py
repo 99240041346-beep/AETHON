@@ -5,6 +5,7 @@ from aethon.web import WebFetcher
 from aethon.web_search import WebSearch
 from app.chart_tools import ChartTool
 from app.web_research import WebResearchAgent
+from app.data_tool import DataAnalysisTool
 
 
 class CalculatorTool:
@@ -183,6 +184,7 @@ class ToolRegistry:
             'web_fetch': WebFetchTool(web_fetch),
             'web_research': WebResearchTool(web_search, web_fetch),
             'chart': ChartToolAdapter(),
+            'data_analyze': DataAnalysisTool(),
         }
 
     def list(self):
