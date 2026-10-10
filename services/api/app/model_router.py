@@ -327,10 +327,14 @@ class ModelRouter:
         raise RuntimeError(f"unsupported model provider: {provider}")
     def generate(self,prompt:str, user_text: str | None = None)->str:
         try:
-            return self.provider.generate(prompt, user_text=user_text)
+            response = self.provider.generate(prompt, user_text=user_text)
+            if not isinstance(response, str) or not response.strip():
+                raise RuntimeError("model provider returned an empty response")
+            return response.strip()
         except Exception as exc:
-            # Keep chat responsive, but make provider failures visible in server logs for diagnosis.
+            # Keep chat responsive, but never send provider internals to the user.
             logger.warning("Configured model provider %s failed (%s); using local fallback",
                            getattr(self.provider, "name", "unknown"), type(exc).__name__)
-            return LocalIntelligenceProvider().generate(prompt, user_text=user_text)
+            fallback = LocalIntelligenceProvider().generate(prompt, user_text=user_text)
+            return fallback.strip() or "I’m having trouble answering that right now. Please try again."
     def health(self)->bool: return self.provider.health()
