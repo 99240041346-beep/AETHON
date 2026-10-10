@@ -16,7 +16,7 @@ function inlineMarkdown(value){
 }
 function text(value){
   const source=String(value??"").replace(/\r\n?/g,"\n");
-  const blocks=[]; let safe=source.replace(/```([^\n`]*)\n([\s\S]*?)```/g,(_,lang,code)=>{const i=blocks.length;blocks.push('<pre class="markdown-code"><code'+(lang.trim()?' data-language="'+esc(lang.trim())+'"':"")+">'+esc(code.replace(/\n$/,""))+"</code></pre>");return "\n@@CODEBLOCK"+i+"@@\n";});
+  const blocks=[]; let safe=source.replace(/```([^\n`]*)\n([\s\S]*?)```/g,(_,lang,code)=>{const i=blocks.length;blocks.push('<pre class="markdown-code"><code'+(lang.trim()?' data-language="'+esc(lang.trim())+'"':"")+">"+esc(code.replace(/\n$/,""))+"</code></pre>");return "\n@@CODEBLOCK"+i+"@@\n";});
   const lines=safe.split("\n"), out=[]; let list=null;
   const closeList=()=>{if(list){out.push("</"+list+">");list=null;}};
   for(let i=0;i<lines.length;i++){
