@@ -135,3 +135,29 @@ def test_openai_compatible_provider_prompt_is_natural_and_creation_focused():
     assert "telugu" in prompt and "code-switching" in prompt
     assert "test what you can" in prompt
     assert "never claim" in prompt
+
+
+def test_model_router_rejects_empty_provider_response_and_returns_nonempty_fallback():
+    class EmptyProvider:
+        name = "empty-test"
+        def generate(self, prompt, user_text=None):
+            return "   "
+        def health(self):
+            return True
+
+    response = ModelRouter(EmptyProvider()).generate("Question", user_text="Explain quantum computing")
+    assert response.strip()
+    assert "remote language model" not in response.lower()
+
+
+def test_model_router_uses_local_fallback_when_provider_raises():
+    class BrokenProvider:
+        name = "broken-test"
+        def generate(self, prompt, user_text=None):
+            raise TimeoutError("private provider detail")
+        def health(self):
+            return False
+
+    response = ModelRouter(BrokenProvider()).generate("Question", user_text="hello")
+    assert response == "Hello! I'm AETHON. How can I help you today?"
+    assert "private provider detail" not in response
