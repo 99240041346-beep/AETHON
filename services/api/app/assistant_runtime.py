@@ -534,7 +534,7 @@ class AssistantRuntime:
                 except Exception as provider_exc:
                     self._emit(events, "ai.provider.fallback", request_id, event_callback,
                                reason=type(provider_exc).__name__)
-                    response = self.model_router.generate(prompt, user_text=text)
+                    response = self.model_router.generate(prompt, user_text=effective_text)
             else:
                 response = self.model_router.generate(prompt, user_text=text)
 
