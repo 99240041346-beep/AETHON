@@ -123,3 +123,15 @@ def test_openai_compatible_provider_does_not_claim_tools_were_run():
     prompt = OpenAICompatibleProvider._system_prompt()
     assert "unless verified by actual tool results" in prompt
     assert "preserve working behavior and architecture" in prompt
+
+
+def test_openai_compatible_provider_prompt_is_natural_and_creation_focused():
+    from aethon.model_router import OpenAICompatibleProvider
+
+    prompt = OpenAICompatibleProvider._system_prompt().lower()
+    assert "talk like a thoughtful human conversational partner" in prompt
+    assert "respond to the actual message first" in prompt
+    assert "versatile builder" in prompt
+    assert "telugu" in prompt and "code-switching" in prompt
+    assert "test what you can" in prompt
+    assert "never claim" in prompt
