@@ -31,6 +31,7 @@ from app.search_api import router as search_router
 from app.integration_api import router as integration_router
 from app.ai_factory_api import router as ai_factory_router
 from app.training_api import router as training_router
+from app.coding_api import router as coding_router
 
 
 def build_task_store():
@@ -65,6 +66,7 @@ app.include_router(search_router)
 app.include_router(integration_router)
 app.include_router(ai_factory_router)
 app.include_router(training_router)
+app.include_router(coding_router)
 app.mount('/static', StaticFiles(directory=os.path.join(os.path.dirname(__file__), 'static')), name='static')
 
 
