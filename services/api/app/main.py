@@ -22,6 +22,7 @@ from aethon.device_gateway_api import router as device_router
 from aethon.assistant_api import router as assistant_router
 from app.assistant_runtime_api import router as assistant_runtime_router
 from app.language_api import router as language_router
+from app.voice_transcription_api import router as voice_transcription_router
 from aethon.android_command_transport_api import router as android_command_transport_router
 from app.capability_registry import CapabilityRegistry
 from app.agent_api import router as agent_router
@@ -56,6 +57,7 @@ app.include_router(device_router)
 app.include_router(assistant_router)
 app.include_router(assistant_runtime_router)
 app.include_router(language_router)
+app.include_router(voice_transcription_router)
 app.include_router(android_command_transport_router)
 app.include_router(agent_router)
 app.include_router(project_router)
