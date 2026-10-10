@@ -125,7 +125,7 @@ class AIProviderFabric:
         if openai_key:
             result.append(OpenAICompatibleAIProvider(
                 "openai", os.getenv("AETHON_OPENAI_BASE_URL", "https://api.openai.com/v1"),
-                os.getenv("AETHON_OPENAI_MODEL", os.getenv("AETHON_MODEL_NAME", "gpt-5.6-luna")),
+                os.getenv("AETHON_OPENAI_MODEL", os.getenv("AETHON_MODEL_NAME", "gpt-6-astra")),
                 openai_key, ("chat", "code", "vision", "research"),
             ))
         gemini_key = os.getenv("AETHON_GEMINI_API_KEY", "")
