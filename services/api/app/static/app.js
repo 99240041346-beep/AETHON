@@ -1,10 +1,11 @@
 (()=>{"use strict";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const state={session:null,busy:false,token:localStorage.getItem("aethon_token")||"",attachments:[],voiceReplies:false,recognition:null,wakeRecognition:null,wakeEnabled:false,voiceLanguage:localStorage.getItem("aethon_voice_language")||"en-IN"};
+const state={session:null,busy:false,token:localStorage.getItem("aethon_token")||"",attachments:[],voiceReplies:false,recognition:null,wakeRecognition:null,wakeEnabled:false,voiceLanguage:navigator.language||"en-IN"};
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api=async(path,opt={})=>{const o={...opt,headers:{...(opt.headers||{}),...(state.token?{Authorization:"Bearer "+state.token}:{})}};if(o.body&&!(o.body instanceof FormData))o.headers["Content-Type"]="application/json";const r=await fetch(path,o);if(!r.ok)throw Error((await r.text()).slice(0,600)||r.statusText);return (r.headers.get("content-type")||"").includes("json")?r.json():r.text()};
 const text=v=>esc(v).replace(/\*\*(.*?)\*\*/g,"<strong>$1</strong>").replace(/\`([^\`]+)\`/g,"<code>$1</code>").split("\n").map(x=>"<div>"+x+"</div>").join("");
-function speakResponse(value){if(!("speechSynthesis"in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(String(value||""));u.lang=state.voiceLanguage||navigator.language||"en-IN";speechSynthesis.speak(u)}
+function speakResponse(value){if(!("speechSynthesis"in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(String(value||""));u.lang=detectSpeechLanguage(String(value||""))||state.voiceLanguage||"en-IN";speechSynthesis.speak(u)}
+function detectSpeechLanguage(s){if(/[\u0C00-\u0C7F]/.test(s))return "te-IN";if(/[\u0900-\u097F]/.test(s))return "hi-IN";if(/[\u0B80-\u0BFF]/.test(s))return "ta-IN";if(/[\u0C80-\u0CFF]/.test(s))return "kn-IN";if(/[\u0D00-\u0D7F]/.test(s))return "ml-IN";if(/[\u0980-\u09FF]/.test(s))return "bn-IN";if(/[\u0A00-\u0A7F]/.test(s))return "pa-IN";if(/[\u0A80-\u0AFF]/.test(s))return "gu-IN";if(/[\u0600-\u06FF]/.test(s))return "ur-PK";if(/[\u4E00-\u9FFF]/.test(s))return "zh-CN";if(/[\u3040-\u30FF]/.test(s))return "ja-JP";if(/[\uAC00-\uD7AF]/.test(s))return "ko-KR";if(/[\u0400-\u04FF]/.test(s))return "ru-RU";return null}
 function toast(msg){let x=document.createElement("div");x.className="toast";x.textContent=msg;document.body.appendChild(x);setTimeout(()=>x.remove(),3000)}
 function setView(name){$$(".view").forEach(x=>x.classList.toggle("active",x.id==="view-"+name));$$(".navitem").forEach(x=>x.classList.toggle("active",x.dataset.view===name));const titles={chat:"Assistant",agents:"Autonomous Agents",factory:"AI Factory",devices:"Device Control",projects:"Projects",research:"Research"};$("#viewTitle").textContent=titles[name]||"Assistant";if(name==="agents")loadAgents();if(name==="factory")loadFactory();if(name==="devices")loadDevices();if(name==="projects")loadProjects()}
 function addMessage(role,content){$("#welcome").style.display="none";const el=document.createElement("article");el.className="message "+role;el.innerHTML='<div class="avatar">'+(role==="user"?"YOU":"A")+'</div><div class="bubble"><small>'+(role==="user"?"You":"Assistant")+'</small><div class="content">'+text(content)+'</div></div>';$("#messages").appendChild(el);$("#messages").scrollTop=$("#messages").scrollHeight;return el}
@@ -96,11 +97,9 @@ async function createProject(){const name=prompt("Project name");if(!name)return
 async function runResearch(){const q=$("#researchQuery").value.trim();if(!q)return;$("#researchResult").innerHTML="<div class='empty'>Researching…</div>";try{const r=await api("/v1/assistant/runtime/respond",{method:"POST",body:JSON.stringify({text:"deep research "+q,execute_tools:true})});$("#researchResult").innerHTML='<h3>ASTRA synthesis</h3><div>'+text(r.response)+'</div>'}catch(e){$("#researchResult").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
 function initVoice(){
 const R=window.SpeechRecognition||window.webkitSpeechRecognition;
-const langSelect=$("#voiceLanguage");
-if(langSelect){langSelect.value=state.voiceLanguage;langSelect.onchange=()=>{state.voiceLanguage=langSelect.value;localStorage.setItem("aethon_voice_language",state.voiceLanguage);if(state.recognition)state.recognition.lang=state.voiceLanguage;if(state.wakeRecognition)state.wakeRecognition.lang=state.voiceLanguage;toast("Voice language: "+(langSelect.options[langSelect.selectedIndex]?.text||state.voiceLanguage));};}
 if(!R){$("#voiceBtn").disabled=true;$("#wakeBtn").disabled=true;$("#voiceStatus").textContent="Voice input is not supported in this browser. Try Chrome or Edge.";return}
 const wakePhrases=[
-/^(hey assistant|ok assistant|okay assistant|hey astra|ok astra|okay astra|hey aethon|ok aethon|okay aethon)[, ]*/i,
+/^(hey assistant|ok assistant|okay assistant|hey aethon|ok aethon|okay aethon)[, ]*/i,
 /^(नमस्ते असिस्टेंट|हे असिस्टेंट|ओके असिस्टेंट|हे एथॉन|ओके एथॉन)[, ]*/i,
 /^(హే అసిస్టెంట్|ఓకే అసిస్టెంట్|హే ఏథాన్|ఓకే ఏథాన్)[, ]*/i,
 /^(ஹே அசிஸ்டன்ட்|ஓகே அசிஸ்டன்ட்)[, ]*/i,
@@ -112,21 +111,21 @@ const wakePhrases=[
 /^(こんにちはアシスタント|ねえアシスタント|你好助手|嗨助手)[, ]*/i
 ];
 const cleanWake=s=>{let out=String(s||"").trim();for(const re of wakePhrases){if(re.test(out)){out=out.replace(re,"").trim();break}}return out};
-const rec=new R();rec.lang=state.voiceLanguage;rec.interimResults=false;rec.continuous=false;
-rec.onstart=()=>$("#voiceStatus").textContent="Listening in "+(langSelect?.selectedOptions[0]?.text||state.voiceLanguage)+"…";
-rec.onresult=e=>{const q=cleanWake(e.results[e.results.length-1][0].transcript);if(q){$("#input").value=q;send(q)}else $("#voiceStatus").textContent="Heard wake phrase. Say your command."};
-rec.onend=()=>$("#voiceStatus").textContent=state.wakeEnabled?"Wake word active · "+state.voiceLanguage:"Enter to send · Shift+Enter for new line";
-rec.onerror=e=>{if(e.error!=="no-speech"&&e.error!=="aborted")toast("Voice input: "+e.error);};
+const rec=new R();rec.lang=navigator.language||"en-US";rec.interimResults=true;rec.continuous=false;
+rec.onstart=()=>$("#voiceStatus").textContent="Listening… speak naturally";
+rec.onresult=e=>{let transcript="";for(let i=0;i<e.results.length;i++)transcript+=e.results[i][0].transcript;$("#input").value=cleanWake(transcript);if(e.results[e.results.length-1].isFinal){const q=cleanWake(transcript);if(q)send(q)}};
+rec.onend=()=>$("#voiceStatus").textContent=state.wakeEnabled?"Wake phrase listening enabled":"Ready for your next message";
+rec.onerror=e=>{if(e.error!=="no-speech"&&e.error!=="aborted")toast("Microphone issue: "+e.error)};
 state.recognition=rec;
-$("#voiceBtn").onclick=()=>{try{rec.lang=state.voiceLanguage;rec.start()}catch{toast("Voice listening is already active.")}};
-$("#speakBtn").onclick=()=>{state.voiceReplies=!state.voiceReplies;$("#speakBtn").classList.toggle("active",state.voiceReplies);toast(state.voiceReplies?"Voice replies enabled":"Voice replies disabled")};
-const wake=new R();wake.continuous=true;wake.interimResults=false;wake.lang=state.voiceLanguage;
-const startWake=()=>{if(!state.wakeEnabled)return;try{wake.lang=state.voiceLanguage;wake.start()}catch{}};
+$("#voiceBtn").onclick=()=>{try{rec.lang=navigator.language||"en-US";rec.start()}catch{toast("Voice listening is already active.")}};
+$("#speakBtn").onclick=()=>{state.voiceReplies=!state.voiceReplies;$("#speakBtn").classList.toggle("active",state.voiceReplies);toast(state.voiceReplies?"Spoken replies enabled":"Spoken replies disabled")};
+const wake=new R();wake.continuous=true;wake.interimResults=false;wake.lang=navigator.language||"en-US";
+const startWake=()=>{if(!state.wakeEnabled)return;try{wake.lang=navigator.language||"en-US";wake.start()}catch{}};
 wake.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(!e.results[i].isFinal)continue;const raw=e.results[i][0].transcript,q=cleanWake(raw);if(q!==raw){try{wake.stop()}catch{};if(q)send(q);else toast("Wake phrase detected. Say your command.")}}};
 wake.onend=()=>{if(state.wakeEnabled)setTimeout(startWake,350)};
-wake.onerror=e=>{if(e.error==="not-allowed"||e.error==="service-not-allowed"){state.wakeEnabled=false;$("#wakeBtn").classList.remove("wakeOn");toast("Allow microphone access to use wake-word listening.")}};
+wake.onerror=e=>{if(e.error==="not-allowed"||e.error==="service-not-allowed"){state.wakeEnabled=false;$("#wakeBtn").classList.remove("wakeOn");toast("Allow microphone access to use wake phrases.")}};
 state.wakeRecognition=wake;
-$("#wakeBtn").onclick=()=>{state.wakeEnabled=!state.wakeEnabled;$("#wakeBtn").classList.toggle("wakeOn",state.wakeEnabled);if(state.wakeEnabled){toast("Wake-word listening enabled in "+state.voiceLanguage+". Keep this tab open and allow microphone access.");startWake()}else{try{wake.stop()}catch{};toast("Wake-word listening disabled")}};
+$("#wakeBtn").onclick=()=>{state.wakeEnabled=!state.wakeEnabled;$("#wakeBtn").classList.toggle("wakeOn",state.wakeEnabled);if(state.wakeEnabled){toast("Wake listening enabled. Keep this tab open and allow microphone access.");startWake()}else{try{wake.stop()}catch{};toast("Wake listening disabled")}};
 }
 async function capabilities(){try{const r=await api("/v1/capabilities");$("#capList").innerHTML=(r.capabilities||[]).map(x=>'<div class="caprow"><span>'+esc(x.name||x)+'</span><span class="badge">AVAILABLE</span></div>').join("");$("#capDialog").showModal()}catch(e){toast(e.message)}}
 async function modelStatus(){try{const r=await api("/v1/model/health");$("#modelStatus").textContent=(r.ok?"● ":"○ ")+(r.provider||"runtime");$("#modelStatus").title=r.mode||""}catch{$("#modelStatus").textContent="○ runtime unavailable"}}
