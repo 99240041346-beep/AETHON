@@ -87,3 +87,39 @@ def test_auto_provider_without_key_uses_local_intelligence(monkeypatch):
     monkeypatch.delenv("AETHON_MODEL_API_KEY", raising=False)
     router = ModelRouter()
     assert router.provider.name == "local-intelligence"
+
+
+def test_openai_compatible_provider_uses_development_system_prompt_and_context(monkeypatch):
+    from aethon.model_router import OpenAICompatibleProvider
+
+    seen = {}
+
+    def fake_post(url, **kwargs):
+        seen["url"] = url
+        seen["payload"] = kwargs["json"]
+        return httpx.Response(200, json={"choices": [{"message": {"content": "Plan first, then test."}}]})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    provider = OpenAICompatibleProvider("https://api.groq.com/openai/v1", "test-model", "test-key")
+    answer = provider.generate(
+        "Conversation history: user asked to fix the existing FastAPI project.",
+        user_text="Help me debug the API",
+    )
+
+    assert answer == "Plan first, then test."
+    assert seen["url"].endswith("/chat/completions")
+    messages = seen["payload"]["messages"]
+    assert messages[0]["role"] == "system"
+    assert "software engineering partner" in messages[0]["content"]
+    assert messages[1]["role"] == "developer"
+    assert "Conversation history" in messages[1]["content"]
+    assert messages[2] == {"role": "user", "content": "Help me debug the API"}
+    assert seen["payload"]["temperature"] == 0.2
+
+
+def test_openai_compatible_provider_does_not_claim_tools_were_run():
+    from aethon.model_router import OpenAICompatibleProvider
+
+    prompt = OpenAICompatibleProvider._system_prompt()
+    assert "unless verified by actual tool results" in prompt
+    assert "preserve working behavior and architecture" in prompt
