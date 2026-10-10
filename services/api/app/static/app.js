@@ -14,7 +14,12 @@ function addMessage(role,content){$("#welcome").style.display="none";const el=do
 function renderAttachments(){$("#attachmentList").innerHTML=state.attachments.map((a,i)=>'<span>'+esc(a.filename)+' <button data-rm="'+i+'">×</button></span>').join("")}
 async function uploadFiles(files){for(const f of [...files].slice(0,5-state.attachments.length)){const fd=new FormData();fd.append("file",f);try{const r=await api("/v1/assistant/runtime/attachments",{method:"POST",body:fd});state.attachments.push(r)}catch(e){toast("Attachment failed: "+e.message)}}renderAttachments()}
 async function send(value){
-  let q=(value||$("#input").value).trim();\n  if(prefs.personalization&&prefs.instructions.trim())q += "\\n\\nUser response preferences (follow when relevant): "+prefs.instructions.trim().slice(0,2000);\n  if(prefs.personalization&&prefs.name.trim())q += "\\n\\nThe user prefers to be called "+prefs.name.trim().slice(0,80)+".";\n  if(prefs.personalization&&prefs.style==="concise")q += "\\n\\nPrefer concise answers.";else if(prefs.personalization&&prefs.style==="detailed")q += "\\n\\nPrefer detailed explanations.";else if(prefs.personalization&&prefs.style==="friendly")q += "\\n\\nUse a friendly, conversational tone.";
+  let q=(value||$("#input").value).trim();
+  if(prefs.personalization&&prefs.instructions.trim())q += "\n\nUser response preferences (follow when relevant): "+prefs.instructions.trim().slice(0,2000);
+  if(prefs.personalization&&prefs.name.trim())q += "\n\nThe user prefers to be called "+prefs.name.trim().slice(0,80)+".";
+  if(prefs.personalization&&prefs.style==="concise")q += "\n\nPrefer concise answers.";
+  else if(prefs.personalization&&prefs.style==="detailed")q += "\n\nPrefer detailed explanations.";
+  else if(prefs.personalization&&prefs.style==="friendly")q += "\n\nUse a friendly, conversational tone.";
   if(!q||state.busy)return;
   $("#input").value="";
   const attachmentIds=state.attachments.map(x=>x.attachment_id);
