@@ -12,7 +12,7 @@ def test_coding_prompt_includes_existing_code_and_error_for_debugging():
     assert "MODE: debug" in prompt
     assert "EXISTING CODE:" in prompt
     assert "ERROR / LOGS:" in prompt
-    assert "Do not claim tests were executed." in prompt
+    assert "Never claim you created files" in prompt
 
 
 def test_coding_prompt_supports_create_and_multifile_output():
