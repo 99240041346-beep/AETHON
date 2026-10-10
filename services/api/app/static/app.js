@@ -100,7 +100,7 @@ const R=window.SpeechRecognition||window.webkitSpeechRecognition;
 const stopTracks=()=>{if(state.mediaStream){state.mediaStream.getTracks().forEach(t=>t.stop());state.mediaStream=null}};
 const transcribeRecording=async blob=>{
   if(!blob||!blob.size){toast("No audio captured. Please try again.");return}
-  const fd=new FormData();fd.append("file",blob,"aethon-voice.webm");
+  const fd=new FormData();const ext=blob.type.includes("mp4")?".m4a":blob.type.includes("ogg")?".ogg":blob.type.includes("wav")?".wav":".webm";fd.append("file",blob,"aethon-voice"+ext);
   $("#voiceStatus").textContent="Transcribing speech… detecting language automatically";
   try{
     const result=await api("/v1/voice/transcribe",{method:"POST",body:fd});
