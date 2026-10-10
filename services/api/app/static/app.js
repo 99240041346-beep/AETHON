@@ -1,6 +1,6 @@
 (()=>{"use strict";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const state={session:null,busy:false,token:localStorage.getItem("aethon_token")||"",attachments:[],voiceReplies:false,recognition:null,wakeRecognition:null,wakeEnabled:false,voiceLanguage:navigator.language||"en-IN"};
+const state={session:null,busy:false,token:localStorage.getItem("aethon_token")||"",attachments:[],voiceReplies:false,recognition:null,wakeRecognition:null,wakeEnabled:false,voiceLanguage:navigator.language||"en-IN",mediaRecorder:null,recordedChunks:[],mediaStream:null};
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api=async(path,opt={})=>{const o={...opt,headers:{...(opt.headers||{}),...(state.token?{Authorization:"Bearer "+state.token}:{})}};if(o.body&&!(o.body instanceof FormData))o.headers["Content-Type"]="application/json";const r=await fetch(path,o);if(!r.ok)throw Error((await r.text()).slice(0,600)||r.statusText);return (r.headers.get("content-type")||"").includes("json")?r.json():r.text()};
 const text=v=>esc(v).replace(/\*\*(.*?)\*\*/g,"<strong>$1</strong>").replace(/\`([^\`]+)\`/g,"<code>$1</code>").split("\n").map(x=>"<div>"+x+"</div>").join("");
@@ -97,9 +97,41 @@ async function createProject(){const name=prompt("Project name");if(!name)return
 async function runResearch(){const q=$("#researchQuery").value.trim();if(!q)return;$("#researchResult").innerHTML="<div class='empty'>Researching…</div>";try{const r=await api("/v1/assistant/runtime/respond",{method:"POST",body:JSON.stringify({text:"deep research "+q,execute_tools:true})});$("#researchResult").innerHTML='<h3>ASTRA synthesis</h3><div>'+text(r.response)+'</div>'}catch(e){$("#researchResult").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
 function initVoice(){
 const R=window.SpeechRecognition||window.webkitSpeechRecognition;
-if(!R){$("#voiceBtn").disabled=true;$("#wakeBtn").disabled=true;$("#voiceStatus").textContent="Voice input is not supported in this browser. Try Chrome or Edge.";return}
+const stopTracks=()=>{if(state.mediaStream){state.mediaStream.getTracks().forEach(t=>t.stop());state.mediaStream=null}};
+const transcribeRecording=async blob=>{
+  if(!blob||!blob.size){toast("No audio captured. Please try again.");return}
+  const fd=new FormData();fd.append("file",blob,"aethon-voice.webm");
+  $("#voiceStatus").textContent="Transcribing speech… detecting language automatically";
+  try{
+    const result=await api("/v1/voice/transcribe",{method:"POST",body:fd});
+    const phrase=String(result.text||"").trim();
+    if(!phrase){toast("No speech detected. Try speaking a little closer to the microphone.");return}
+    $("#input").value=phrase;
+    $("#voiceStatus").textContent=result.language?"Detected language: "+result.language:"Speech recognized";
+    await send(phrase);
+  }catch(e){$("#voiceStatus").textContent="Voice transcription unavailable";toast(e.message||"Voice transcription failed")}
+};
+$("#voiceBtn").onclick=async()=>{
+  if(state.mediaRecorder&&state.mediaRecorder.state==="recording"){state.mediaRecorder.stop();$("#voiceBtn").classList.remove("active");$("#voiceStatus").textContent="Finishing recording…";return}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||!window.MediaRecorder){toast("Audio recording is not supported here. Try the latest Chrome or Edge over HTTPS.");return}
+  try{
+    state.mediaStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    const preferred=["audio/webm;codecs=opus","audio/webm","audio/mp4"].find(t=>MediaRecorder.isTypeSupported(t));
+    state.mediaRecorder=preferred?new MediaRecorder(state.mediaStream,{mimeType:preferred}):new MediaRecorder(state.mediaStream);
+    state.recordedChunks=[];
+    state.mediaRecorder.ondataavailable=e=>{if(e.data&&e.data.size)state.recordedChunks.push(e.data)};
+    state.mediaRecorder.onerror=()=>{stopTracks();$("#voiceBtn").classList.remove("active");toast("Audio recording failed.")};
+    state.mediaRecorder.onstop=()=>{
+      const blob=new Blob(state.recordedChunks,{type:state.mediaRecorder.mimeType||"audio/webm"});
+      state.recordedChunks=[];stopTracks();$("#voiceBtn").classList.remove("active");transcribeRecording(blob);
+    };
+    state.mediaRecorder.start();$("#voiceBtn").classList.add("active");$("#voiceStatus").textContent="Recording… click the microphone again when you finish";
+  }catch(e){stopTracks();toast(e.name==="NotAllowedError"?"Allow microphone access to use voice chat.":("Could not start microphone: "+(e.message||"unknown error")))}
+};
+$("#speakBtn").onclick=()=>{state.voiceReplies=!state.voiceReplies;$("#speakBtn").classList.toggle("active",state.voiceReplies);toast(state.voiceReplies?"Spoken replies enabled":"Spoken replies disabled")};
+if(!R){$("#wakeBtn").disabled=true;$("#voiceStatus").textContent="Tap the microphone to record a voice message; multilingual transcription needs server setup." ;return}
 const wakePhrases=[
-/^(hey assistant|ok assistant|okay assistant|hey aethon|ok aethon|okay aethon)[, ]*/i,
+/^(hey buddy|ok buddy|okay buddy|hey assistant|ok assistant|okay assistant|hey aethon|ok aethon|okay aethon)[, ]*/i,
 /^(नमस्ते असिस्टेंट|हे असिस्टेंट|ओके असिस्टेंट|हे एथॉन|ओके एथॉन)[, ]*/i,
 /^(హే అసిస్టెంట్|ఓకే అసిస్టెంట్|హే ఏథాన్|ఓకే ఏథాన్)[, ]*/i,
 /^(ஹே அசிஸ்டன்ட்|ஓகே அசிஸ்டன்ட்)[, ]*/i,
@@ -111,21 +143,13 @@ const wakePhrases=[
 /^(こんにちはアシスタント|ねえアシスタント|你好助手|嗨助手)[, ]*/i
 ];
 const cleanWake=s=>{let out=String(s||"").trim();for(const re of wakePhrases){if(re.test(out)){out=out.replace(re,"").trim();break}}return out};
-const rec=new R();rec.lang=navigator.language||"en-US";rec.interimResults=true;rec.continuous=false;
-rec.onstart=()=>$("#voiceStatus").textContent="Listening… speak naturally";
-rec.onresult=e=>{let transcript="";for(let i=0;i<e.results.length;i++)transcript+=e.results[i][0].transcript;$("#input").value=cleanWake(transcript);if(e.results[e.results.length-1].isFinal){const q=cleanWake(transcript);if(q)send(q)}};
-rec.onend=()=>$("#voiceStatus").textContent=state.wakeEnabled?"Wake phrase listening enabled":"Ready for your next message";
-rec.onerror=e=>{if(e.error!=="no-speech"&&e.error!=="aborted")toast("Microphone issue: "+e.error)};
-state.recognition=rec;
-$("#voiceBtn").onclick=()=>{try{rec.lang=navigator.language||"en-US";rec.start()}catch{toast("Voice listening is already active.")}};
-$("#speakBtn").onclick=()=>{state.voiceReplies=!state.voiceReplies;$("#speakBtn").classList.toggle("active",state.voiceReplies);toast(state.voiceReplies?"Spoken replies enabled":"Spoken replies disabled")};
 const wake=new R();wake.continuous=true;wake.interimResults=false;wake.lang=navigator.language||"en-US";
 const startWake=()=>{if(!state.wakeEnabled)return;try{wake.lang=navigator.language||"en-US";wake.start()}catch{}};
-wake.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(!e.results[i].isFinal)continue;const raw=e.results[i][0].transcript,q=cleanWake(raw);if(q!==raw){try{wake.stop()}catch{};if(q)send(q);else toast("Wake phrase detected. Say your command.")}}};
-wake.onend=()=>{if(state.wakeEnabled)setTimeout(startWake,350)};
+wake.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(!e.results[i].isFinal)continue;const raw=e.results[i][0].transcript,q=cleanWake(raw);if(q!==raw){try{wake.stop()}catch{};if(q){$("#input").value=q;$("#voiceStatus").textContent="Wake phrase detected. Tap microphone to record your request."}else toast("Wake phrase detected. Tap the microphone and speak.")}}};
+wake.onend=()=>{if(state.wakeEnabled)setTimeout(startWake,500)};
 wake.onerror=e=>{if(e.error==="not-allowed"||e.error==="service-not-allowed"){state.wakeEnabled=false;$("#wakeBtn").classList.remove("wakeOn");toast("Allow microphone access to use wake phrases.")}};
 state.wakeRecognition=wake;
-$("#wakeBtn").onclick=()=>{state.wakeEnabled=!state.wakeEnabled;$("#wakeBtn").classList.toggle("wakeOn",state.wakeEnabled);if(state.wakeEnabled){toast("Wake listening enabled. Keep this tab open and allow microphone access.");startWake()}else{try{wake.stop()}catch{};toast("Wake listening disabled")}};
+$("#wakeBtn").onclick=()=>{state.wakeEnabled=!state.wakeEnabled;$("#wakeBtn").classList.toggle("wakeOn",state.wakeEnabled);if(state.wakeEnabled){toast("Wake-word listening enabled. Keep this tab open and allow microphone access.");startWake()}else{try{wake.stop()}catch{};toast("Wake-word listening disabled")}};
 }
 async function capabilities(){try{const r=await api("/v1/capabilities");$("#capList").innerHTML=(r.capabilities||[]).map(x=>'<div class="caprow"><span>'+esc(x.name||x)+'</span><span class="badge">AVAILABLE</span></div>').join("");$("#capDialog").showModal()}catch(e){toast(e.message)}}
 async function modelStatus(){try{const r=await api("/v1/model/health");$("#modelStatus").textContent=(r.ok?"● ":"○ ")+(r.provider||"runtime");$("#modelStatus").title=r.mode||""}catch{$("#modelStatus").textContent="○ runtime unavailable"}}
