@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#07090f"><meta name="description" content="AETHON AI assistant">
+<title>AETHON</title><link rel="stylesheet" href="/static/styles.css">
+</head><body>
+<div class="shell">
+<aside class="sidebar" id="sidebar">
+  <div class="brand"><div class="logo">A</div><div><b>AETHON Assistant</b><small>AI assistant</small></div></div>
+  <button class="new" id="newChat">＋ New conversation</button>
+  <nav class="nav">
+    <button class="navitem active" data-view="chat">◉ <span>Assistant</span></button>
+    <button class="navitem" data-view="coding">⌘ <span>Coding</span></button>
+    <button class="navitem" data-view="agents">✦ <span>Agents</span></button>
+    <button class="navitem" data-view="factory">⚙ <span>AI Factory</span></button>
+    <button class="navitem" data-view="devices">▣ <span>Devices</span></button>
+    <button class="navitem" data-view="projects">◫ <span>Projects</span></button>
+    <button class="navitem" data-view="research">⌕ <span>Research</span></button>
+  </nav>
+  <div class="side-section"><label>Recent conversations</label><div id="sessions"></div></div>
+  <div class="sidebottom"><button class="sidebtn" id="capabilitiesBtn">◇ Capabilities</button><button class="sidebtn" id="settingsBtn">⚙ Settings</button><button class="sidebtn" id="docsBtn">⌘ API Docs</button></div>
+</aside>
+<main class="main">
+<header class="topbar"><button class="mobile" id="menuBtn">☰</button><div><span class="online"></span><strong id="viewTitle">Assistant</strong></div><div class="topactions"><span id="modelStatus" class="model">Checking runtime…</span><button id="renameBtn">✎</button></div></header>
+
+<section class="view active" id="view-chat">
+  <div class="welcome" id="welcome"><div class="hero">A</div><h1>What should I do?</h1><p>Your AI workspace for reasoning, research, creation and authorized action.</p>
+  <div class="quick"><button data-prompt="What can you do?"><b>Explore Assistant</b><span>See available capabilities</span></button><button data-prompt="Research the latest developments in AI agents."><b>Deep Research</b><span>Search and synthesize information</span></button><button data-prompt="Create a software project plan from idea to deployment."><b>Build a project</b><span>Plan tasks and execution</span></button><button data-prompt="Create a histogram: 10, 12, 12, 15, 18, 20, 21, 21, 25, 30."><b>Analyze data</b><span>Generate a verified chart</span></button></div></div>
+  <div class="messages" id="messages"></div><div class="typing" id="typing">● ● ● <span>Working</span></div>
+  <div class="composerWrap"><div id="attachmentList" class="attachments"></div><div class="composer">
+    <input id="attachmentInput" type="file" hidden multiple><button id="attachBtn" title="Attach files">＋</button><button id="voiceBtn" class="voice-btn" title="Voice input">🎙</button><button id="wakeBtn" title="Wake word">◉</button><button id="speakBtn" title="Voice replies">🔊</button>
+    <textarea id="input" rows="1" maxlength="8000" placeholder="Message AETHON…"></textarea><button id="send" class="send">↑</button>
+  </div><div class="meta"><span id="voiceStatus">Enter to send · Shift+Enter for new line</span><span>Files up to 5</span></div></div>
+</section>
+
+<section class="view" id="view-coding"><div class="page"><div class="pagehead"><div><span class="eyebrow">SOFTWARE ENGINEERING</span><h1>Coding Engineer</h1><p>Generate, debug, explain, review, refactor, and design tests for code in common languages.</p></div><span id="codingStatus" class="badge">READY</span></div>
+<form id="codingForm" class="formcard coding-form"><div class="grid2"><label>Task<select name="mode"><option value="create">Create code</option><option value="debug">Debug / fix error</option><option value="explain">Explain code</option><option value="review">Code review</option><option value="tests">Write tests</option><option value="refactor">Refactor code</option></select></label><label>Language<select name="language"><option value="auto">Auto detect / choose</option><option>Python</option><option>JavaScript</option><option>TypeScript</option><option>Java</option><option>C</option><option>C++</option><option>C#</option><option>Go</option><option>Rust</option><option>SQL</option><option>HTML/CSS</option><option>Kotlin</option><option>Dart</option><option>PHP</option><option>R</option><option>MATLAB</option></select></label></div>
+<label>Framework or tools<input name="framework" placeholder="FastAPI, React, ESP32 Arduino, Django…"></label>
+<label>What do you want to build or fix?<textarea name="request" required minlength="3" maxlength="12000" rows="4" placeholder="Describe the feature, expected behavior, inputs/outputs, and constraints."></textarea></label>
+<label>Existing code (optional)<textarea name="code" maxlength="30000" rows="7" placeholder="Paste the relevant code here…"></textarea></label>
+<label>Error message or logs (optional)<textarea name="error" maxlength="12000" rows="3" placeholder="Paste the full error or test failure…"></textarea></label>
+<label>Requirements / constraints (optional)<textarea name="constraints" maxlength="6000" rows="2" placeholder="Operating system, versions, performance, security, hardware pins, etc."></textarea></label>
+<div class="coding-actions"><button class="primary" id="codingSubmit" type="submit">Generate solution</button><button type="button" class="setting-action" id="codingClear">Clear form</button></div></form>
+<section class="coding-output-wrap"><div class="pagehead"><div><span class="eyebrow">ENGINEER'S RESPONSE</span><h2>Solution</h2></div><button id="codingCopy" class="setting-action" type="button" disabled>Copy result</button></div><pre id="codingOutput" class="coding-output">Your generated solution will appear here.</pre><p id="codingVerification" class="muted coding-verification">Code is not executed by this first milestone. Run the suggested checks in your own environment.</p></section>
+</div></section>
+<section class="view" id="view-agents"><div class="page"><div class="pagehead"><div><span class="eyebrow">AUTONOMOUS WORK</span><h1>Agents</h1><p>Run bounded specialist agents and monitor their verified progress.</p></div><button class="primary" id="refreshAgents">Refresh</button></div><div id="agentList" class="cards"></div></div></section>
+
+<section class="view" id="view-factory"><div class="page"><div class="pagehead"><div><span class="eyebrow">AI CREATES AI</span><h1>AI Factory</h1><p>Specify, generate, sandbox, evaluate, approve and deploy agents. Generated artifacts are never executed implicitly.</p></div></div>
+<form id="factoryForm" class="formcard"><div class="grid2"><label>Name<input name="name" required placeholder="Rain Alert Agent"></label><label>Model<input name="model" value="provider-default"></label></div><label>Goal<textarea name="goal" required placeholder="Monitor weather information and prepare heavy-rain alerts."></textarea></label><div class="grid2"><label>Capabilities<input name="capabilities" placeholder="research, alerts, scheduling"></label><label>Tools<input name="tools" placeholder="web_research, notifications"></label></div><label>Constraints<input name="constraints" placeholder="bounded output, confirmation for external actions"></label><button class="primary">Create AI agent</button></form><div id="factoryList" class="cards"></div></div></section>
+
+<section class="view" id="view-devices"><div class="page"><div class="pagehead"><div><span class="eyebrow">CONTROL HUB</span><h1>Devices</h1><p>Android is the primary control hub. Connected endpoints expose only authorized capabilities.</p></div><button class="primary" id="refreshDevices">Refresh</button></div><div class="deviceHero"><div><b>Android Control Hub</b><p>Use the Android Assistant app to register and execute queued commands.</p></div><div class="badge">SECURE · BOUNDED</div></div><div id="deviceList" class="cards"></div></div></section>
+
+<section class="view" id="view-projects"><div class="page"><div class="pagehead"><div><span class="eyebrow">WORKSPACE</span><h1>Projects</h1><p>Keep instructions, context and long-running work organized.</p></div><button class="primary" id="newProject">＋ Project</button></div><div id="projectList" class="cards"></div></div></section>
+
+<section class="view" id="view-research"><div class="page"><div class="pagehead"><div><span class="eyebrow">KNOWLEDGE</span><h1>Research</h1><p>Use the assistant for web research, source comparison and cited synthesis.</p></div></div><div class="researchBox"><textarea id="researchQuery" placeholder="What do you want to research?"></textarea><button class="primary" id="runResearch">Research with Assistant</button></div><div id="researchResult" class="researchResult"></div></div></section>
+</main></div>
+
+<dialog id="capDialog"><div class="dialogHead"><h2>Assistant capabilities</h2><button data-close>×</button></div><div id="capList"></div></dialog>
+<dialog id="settingsDialog" class="settings-dialog"><div class="dialogHead"><div><span class="eyebrow">YOUR WORKSPACE</span><h2>Settings</h2></div><button data-close aria-label="Close settings">×</button></div>
+<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections">
+<button class="setting-tab active" data-setting-tab="general">General</button><button class="setting-tab" data-setting-tab="personalization">Personalization</button><button class="setting-tab" data-setting-tab="voice">Voice</button><button class="setting-tab" data-setting-tab="data">Data controls</button><button class="setting-tab" data-setting-tab="privacy">Privacy & security</button><button class="setting-tab" data-setting-tab="connections">Connections</button><button class="setting-tab" data-setting-tab="about">About</button></nav>
+<div class="settings-content">
+<section class="setting-panel active" data-setting-panel="general"><h3>General</h3><p class="muted">Make AETHON feel right on your device.</p>
+<label>Appearance<select id="prefTheme"><option value="dark">Dark</option><option value="light">Light</option><option value="system">Use device setting</option></select></label>
+<label>Accent color<select id="prefAccent"><option value="blue">Blue</option><option value="violet">Violet</option><option value="green">Green</option><option value="orange">Orange</option></select></label>
+<label>Interface language<select id="prefLanguage"><option value="auto">Automatic</option><option value="en">English</option><option value="te">తెలుగు</option><option value="hi">हिन्दी</option><option value="ta">தமிழ்</option><option value="kn">ಕನ್ನಡ</option></select></label>
+<label class="setting-toggle"><span><b>Enter sends message</b><small>Shift + Enter still creates a new line.</small></span><input id="prefEnter" type="checkbox"></label>
+<label class="setting-toggle"><span><b>Show model status</b><small>Display runtime status in the top bar.</small></span><input id="prefModelStatus" type="checkbox"></label></section>
+<section class="setting-panel" data-setting-panel="personalization"><h3>Personalization</h3><p class="muted">Set how you want your assistant to respond. These preferences stay in this browser.</p>
+<label>What should AETHON call you?<input id="prefName" maxlength="80" placeholder="Optional"></label>
+<label>Response style<select id="prefStyle"><option value="balanced">Balanced</option><option value="concise">Concise</option><option value="detailed">Detailed</option><option value="friendly">Friendly and conversational</option></select></label>
+<label>Custom instructions<textarea id="prefInstructions" rows="5" maxlength="2000" placeholder="Your goals, preferred language, formatting, or coding conventions…"></textarea></label>
+<label class="setting-toggle"><span><b>Use personalization</b><small>Include your saved preferences with new messages.</small></span><input id="prefPersonalization" type="checkbox"></label></section>
+<section class="setting-panel" data-setting-panel="voice"><h3>Voice</h3><p class="muted">Configure voice features supported by this browser and server.</p>
+<label class="setting-toggle"><span><b>Read replies aloud</b><small>Use your browser's available speech voice.</small></span><input id="prefVoiceReplies" type="checkbox"></label>
+<label>Preferred speech language<select id="prefVoiceLanguage"><option value="auto">Automatic</option><option value="en-IN">English (India)</option><option value="te-IN">Telugu</option><option value="hi-IN">Hindi</option><option value="ta-IN">Tamil</option><option value="kn-IN">Kannada</option><option value="ml-IN">Malayalam</option></select></label>
+<label class="setting-toggle"><span><b>Wake phrase listening</b><small>Browser speech recognition support and microphone permission are required.</small></span><input id="prefWake" type="checkbox"></label>
+<div class="setting-note">Voice transcription also requires the server-side transcription provider to be configured. No API key belongs in this page.</div></section>
+<section class="setting-panel" data-setting-panel="data"><h3>Data controls</h3><p class="muted">Manage local preferences and export what is currently visible in this chat.</p>
+<button class="setting-action" id="exportChat">Export current conversation (.txt)</button><button class="setting-action danger" id="clearCurrentChat">Clear current chat view</button><button class="setting-action danger" id="resetPreferences">Reset local preferences</button>
+<div class="setting-note">Clearing this view does not delete server-side conversation history. Use the conversation controls when server-side deletion is available.</div></section>
+<section class="setting-panel" data-setting-panel="privacy"><h3>Privacy & security</h3><p class="muted">Control the optional token used by this browser.</p>
+<label>API bearer token<input id="token" type="password" autocomplete="off" placeholder="Optional token"></label><label class="setting-toggle"><span><b>Remember token on this device</b><small>Stored in this browser's local storage. Avoid on shared devices.</small></span><input id="prefRememberToken" type="checkbox"></label>
+<button class="setting-action danger" id="clearToken">Remove saved token</button>
+<div class="setting-note">Never paste provider secrets into chat. Configure model and transcription credentials in the server environment.</div></section>
+<section class="setting-panel" data-setting-panel="connections"><h3>Connections</h3><p class="muted">Live service integrations depend on server configuration.</p><div class="connection-row"><span><b>Assistant API</b><small>Chat, sessions and attachments</small></span><span class="connection-status" id="settingApiStatus">Checking…</span></div><div class="connection-row"><span><b>Model provider</b><small>Configured by server environment</small></span><span class="connection-status" id="settingModelStatus">Checking…</span></div><div class="connection-row"><span><b>Voice transcription</b><small>Server-side provider required</small></span><span class="connection-status">Server configured</span></div><button class="setting-action" id="refreshSettingsStatus">Refresh connection status</button></section>
+<section class="setting-panel" data-setting-panel="about"><h3>About AETHON</h3><p class="muted">Think. Create. Act.</p><div class="setting-note">AETHON is an AI workspace for conversation, research, software creation and authorized tool use. The actual tools and providers available depend on the connected runtime.</div><button class="setting-action" id="openApiDocs">Open API documentation</button></section>
+</div></div><div class="settings-footer"><span id="settingsSaved" class="muted">Settings are saved on this device.</span><button class="primary" id="saveSettings">Save settings</button></div></dialog>
+<script src="/static/app.js?v=20261010-coding-skill"></script></body></html>
