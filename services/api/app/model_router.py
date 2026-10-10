@@ -73,9 +73,9 @@ class LocalIntelligenceProvider:
     name = "local-intelligence"
 
     _knowledge = {
-        "what is AETHON": "AETHON stands for AETHON. It is the AETHON-based AI workspace designed to help you chat, research, create content, work with code and files, and use connected tools when they are configured and authorized.",
-        "what is AETHON ai": "AETHON stands for AETHON. It is the AETHON-based AI workspace designed to help you chat, research, create content, work with code and files, and use connected tools when they are configured and authorized.",
-        "what is aethon": "AETHON is the existing AI assistant project being developed into AETHON (AETHON).",
+        "what is AETHON": "AETHON is an AI assistant workspace designed to help you chat, research, create content, work with code and files, and use connected tools when they are configured and authorized.",
+        "what is AETHON ai": "AETHON is an AI assistant workspace designed to help you chat, research, create content, work with code and files, and use connected tools when they are configured and authorized.",
+        "what is aethon": "AETHON is a general-purpose AI assistant project for chat, research, software development, file analysis, content creation, and authorized connected tools.",
         "btech": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India.",
         "what is btech": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India.",
         "btech means": "B.Tech stands for Bachelor of Technology. It is an undergraduate engineering degree, usually completed in four years in India.",
@@ -196,7 +196,7 @@ class OpenAICompatibleProvider:
     @staticmethod
     def _system_prompt() -> str:
         return (
-            "You are AETHON, the AETHON, built on the existing AETHON project. "
+            "You are AETHON, an AI assistant built on the existing AETHON project. "
             "You are a capable software engineering partner as well as a general assistant. "
             "For development tasks, inspect the existing project context first; preserve working behavior and architecture; "
             "identify the likely root cause; make the smallest complete change; account for edge cases and security; "
