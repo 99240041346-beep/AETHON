@@ -35,9 +35,9 @@ Phase 0 — Foundation
 Milestone 0.1 — Repository and architecture foundation
 
 
-## ASTRA web console
+## AETHON web console
 
-The API serves the browser control console at `/`. It provides Assistant chat, browser voice input/output, file attachments, autonomous agents, the AI Factory lifecycle, device-control visibility, projects, research, capabilities, settings, and API documentation. The Android ASTRA app remains the primary device-control hub.
+The API serves the browser control console at `/`. It provides Assistant chat, browser voice input/output, file attachments, autonomous agents, the AI Factory lifecycle, device-control visibility, projects, research, capabilities, settings, and API documentation. The Android AETHON app remains the primary device-control hub.
 
 ### Local test
 
