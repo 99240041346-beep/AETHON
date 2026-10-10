@@ -536,7 +536,7 @@ class AssistantRuntime:
                                reason=type(provider_exc).__name__)
                     response = self.model_router.generate(prompt, user_text=effective_text)
             else:
-                response = self.model_router.generate(prompt, user_text=text)
+                response = self.model_router.generate(prompt, user_text=effective_text)
 
             if self._needs_web_fallback(response, self.model_router, text) and execute_tools and len(text.split()) >= 2:
                 self._emit(events, "research.fallback", request_id, event_callback, query=text)
